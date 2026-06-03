@@ -1,0 +1,11 @@
+"""Moonmap package exports."""
+
+from __future__ import annotations
+
+__all__ = []
+
+__version__ = "0.1.0"
+
+__description__ = """
+Root package for the moonmap application.
+"""

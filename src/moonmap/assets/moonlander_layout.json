@@ -1,0 +1,10 @@
+{
+  "_comment": "Physical key positions for the Moonlander Mark I. Derived from geometry in github.com/Nuigurumi777/mllayoutvisualizer. Units: pixels. Key index matches QMK LAYOUT_moonlander() argument order (left-to-right, top-to-bottom, left half first then right half, thumb clusters last). TODO: verify index mapping against your actual keymap.c key count.",
+  "canvas_width": 1050,
+  "canvas_height": 460,
+  "key_size": 55,
+  "gap": 5,
+  "left_offset": 10,
+  "right_offset": 540,
+  "keys": []
+}
