@@ -6,6 +6,7 @@ from PyQt6.QtCore import QPointF
 from PyQt6.QtGui import QColor, QImage, QPainter
 
 from moonmap.layout.qmk_parser import parse_keymap_c
+from moonmap.ui.key_tooltip import KeyTooltip
 from moonmap.ui.keyboard_widget import KeyboardWidget
 from moonmap.ui.layer_bar import LayerBar
 from moonmap.ui.main_window import MainWindow
@@ -54,16 +55,71 @@ def test_keyboard_widget_exposes_hover_detail_for_compact_labels() -> None:
     layout = parse_keymap_c(SAMPLE_KEYMAP)
     widget.set_layout_model(layout)
 
-    details: list[str] = []
-    widget.hover_detail_changed.connect(details.append)
-
     key_info = widget._key_geometry[ENTER_THUMB_INDEX]
     assert widget._key_index_at(QPointF(float(key_info["cx"]), float(key_info["cy"]))) == ENTER_THUMB_INDEX
-    widget.hover_detail_changed.emit(f"Key {ENTER_THUMB_INDEX}: {widget._displays[ENTER_THUMB_INDEX].detail}")
+    hover_info = widget.hover_info_for_key(ENTER_THUMB_INDEX)
 
+    assert hover_info is not None
     assert widget.label_for_key(ENTER_THUMB_INDEX) == "⏎"
-    assert "LT(4, KC_ENTER)" in details[-1]
-    assert "hold: L4" in details[-1]
+    assert hover_info.index == ENTER_THUMB_INDEX
+    assert hover_info.active_layer_index == 0
+    assert hover_info.active_code == "LT(4, KC_ENTER)"
+    assert hover_info.resolved_code == "LT(4, KC_ENTER)"
+    assert hover_info.main == "⏎"
+    assert hover_info.hold == "L4"
+    assert "hold: L4" in hover_info.detail
+
+
+def test_keyboard_widget_hover_info_includes_transparent_source_layer_and_led_color() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    widget.set_layout_model(layout)
+    widget.set_active_layer(1)
+
+    hover_info = widget.hover_info_for_key(0)
+
+    assert hover_info is not None
+    assert hover_info.active_layer_index == 1
+    assert hover_info.active_code == "KC_TRANSPARENT"
+    assert hover_info.resolved_code == "KC_GRAVE"
+    assert hover_info.source_layer_index == 0
+    assert hover_info.source_layer_name == "Layer 0"
+    assert hover_info.led_color == layout.layers[1].keys[0].led_color
+    assert hover_info.led_hex.startswith("#")
+
+
+def test_key_tooltip_populates_structured_rows() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    widget.set_layout_model(layout)
+    hover_info = widget.hover_info_for_key(ENTER_THUMB_INDEX)
+    assert hover_info is not None
+    tooltip = KeyTooltip()
+
+    tooltip.set_hover_info(hover_info)
+
+    assert tooltip.row_text("tap") == "⏎"
+    assert tooltip.row_text("hold") == "L4"
+    assert tooltip.row_text("active_code") == "LT(4, KC_ENTER)"
+    assert tooltip.row_text("resolved_code") == "LT(4, KC_ENTER)"
+    assert tooltip.row_visible("shift") is False
+
+
+def test_key_tooltip_shows_inherited_source_and_led_hex() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    widget.set_layout_model(layout)
+    widget.set_active_layer(1)
+    hover_info = widget.hover_info_for_key(0)
+    assert hover_info is not None
+    tooltip = KeyTooltip()
+
+    tooltip.set_hover_info(hover_info)
+
+    assert tooltip.row_text("source_layer") == "0 - Layer 0"
+    assert tooltip.row_text("active_code") == "KC_TRANSPARENT"
+    assert tooltip.row_text("resolved_code") == "KC_GRAVE"
+    assert tooltip.row_text("led") == hover_info.led_hex
 
 
 def test_keyboard_widget_paints_nonblank_output_and_highlight() -> None:
@@ -100,6 +156,20 @@ def test_main_window_loads_layout_path() -> None:
     status_bar = window.statusBar()
     assert status_bar is not None
     assert status_bar.currentMessage() == "Layer 0 - Layer 0"
+
+
+def test_main_window_hover_does_not_replace_live_status_bar() -> None:
+    window = MainWindow(start_hook=False)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    status_bar.showMessage("Key down: KC_A; layer 0; matches: 29")
+    hover_info = window._keyboard.hover_info_for_key(ENTER_THUMB_INDEX)
+    assert hover_info is not None
+
+    window._handle_hover_info_changed(hover_info)
+
+    assert status_bar.currentMessage() == "Key down: KC_A; layer 0; matches: 29"
 
 
 def _count_nonwhite_pixels(image: QImage) -> int:

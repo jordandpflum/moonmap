@@ -11,24 +11,62 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from PyQt6.QtCore import QPointF, QSize, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QPaintEvent, QPainter
 from PyQt6.QtWidgets import QWidget
 
-from moonmap.layout.models import Key, KeyDisplay, Layer, Layout, RgbColor
+from moonmap.layout.models import Key, KeyDisplay, Layer, LayerAction, Layout, RgbColor
 from moonmap.ui.key_widget import KeyPaintState, draw_key
 
 ASSET_PATH = Path(__file__).resolve().parents[1] / "assets" / "moonlander_layout.json"
 TRANSPARENT_CODES = {"_______", "KC_TRANSPARENT", "KC_TRNS"}
 
 
+@dataclass(frozen=True)
+class KeyHoverInfo:
+    """Structured hover details for a rendered physical key."""
+
+    index: int
+    label: str
+    active_layer_index: int
+    active_layer_name: str
+    active_code: str
+    resolved_code: str
+    main: str
+    shifted: str
+    hold: str
+    detail: str
+    source_layer_index: int | None = None
+    source_layer_name: str | None = None
+    led_color: RgbColor | None = None
+    layer_action: LayerAction | None = None
+    is_pressed: bool = False
+    is_layer_key: bool = False
+
+    @property
+    def led_hex(self) -> str:
+        """Return the LED color as a CSS-style hex string."""
+        if self.led_color is None:
+            return ""
+        red, green, blue = self.led_color
+        return f"#{red:02X}{green:02X}{blue:02X}"
+
+
+@dataclass(frozen=True)
+class _KeyContext:
+    source_key: Key | None
+    effective_key: Key | None
+    inherited_layer_index: int | None
+
+
 class KeyboardWidget(QWidget):
     """Render the Moonlander physical key layout."""
 
-    hover_detail_changed = pyqtSignal(str)
+    hover_info_changed = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the keyboard widget."""
@@ -42,6 +80,9 @@ class KeyboardWidget(QWidget):
         self._labels: dict[int, str] = {index: "" for index in self._key_geometry}
         self._displays: dict[int, KeyDisplay] = {index: KeyDisplay() for index in self._key_geometry}
         self._led_colors: dict[int, RgbColor | None] = {index: None for index in self._key_geometry}
+        self._key_contexts: dict[int, _KeyContext] = {
+            index: _KeyContext(None, None, None) for index in self._key_geometry
+        }
         self._layer_key_indexes: set[int] = set()
         self._layer_active_indexes: set[int] = set()
         self._pressed_indexes: set[int] = set()
@@ -73,15 +114,62 @@ class KeyboardWidget(QWidget):
         """Return indexes currently marked as pressed."""
         return sorted(self._pressed_indexes)
 
+    def hover_info_for_key(self, index: int) -> KeyHoverInfo | None:
+        """Return structured hover information for a rendered key."""
+        if index not in self._key_geometry or self._layout_model is None:
+            return None
+
+        context = self._key_contexts.get(index)
+        if context is None or context.effective_key is None:
+            return None
+
+        active_layer = self._layer_by_index(self._active_layer)
+        source_key = context.source_key
+        effective_key = context.effective_key
+        display = self._displays[index]
+        source_layer = (
+            self._layer_by_index(context.inherited_layer_index)
+            if context.inherited_layer_index is not None
+            else None
+        )
+
+        return KeyHoverInfo(
+            index=index,
+            label=self._labels[index],
+            active_layer_index=self._active_layer,
+            active_layer_name=active_layer.name if active_layer is not None else f"Layer {self._active_layer}",
+            active_code=source_key.code if source_key is not None else "",
+            resolved_code=effective_key.code,
+            main=display.main,
+            shifted=display.shifted,
+            hold=display.hold,
+            detail=display.detail,
+            source_layer_index=source_layer.index if source_layer is not None else None,
+            source_layer_name=source_layer.name if source_layer is not None else None,
+            led_color=self._led_colors[index],
+            layer_action=effective_key.layer_action,
+            is_pressed=index in self._pressed_indexes,
+            is_layer_key=index in self._layer_key_indexes,
+        )
+
+    def key_anchor_global_pos(self, index: int) -> QPoint:
+        """Return a global position near the center of a rendered key."""
+        key_info = self._key_geometry[index]
+        return self.mapToGlobal(QPoint(int(float(key_info["cx"])), int(float(key_info["cy"]))))
+
     def set_layout_model(self, layout: Layout | None) -> None:
         """Set the parsed layout model and redraw the active layer."""
         self._layout_model = layout
         self._active_layer = 0
+        self._hovered_index = None
+        self.hover_info_changed.emit(None)
         self._redraw_labels()
 
     def set_active_layer(self, layer_index: int) -> None:
         """Switch displayed key labels to a layer."""
         self._active_layer = layer_index
+        self._hovered_index = None
+        self.hover_info_changed.emit(None)
         self._redraw_labels()
 
     def update_key_state(self, index: int, pressed: bool) -> None:
@@ -135,16 +223,15 @@ class KeyboardWidget(QWidget):
             return
         self._hovered_index = index
         if index is None:
-            self.hover_detail_changed.emit("")
+            self.hover_info_changed.emit(None)
             return
-        detail = self._displays[index].detail or self._labels[index]
-        self.hover_detail_changed.emit(f"Key {index}: {detail}" if detail else f"Key {index}")
+        self.hover_info_changed.emit(self.hover_info_for_key(index))
 
     def leaveEvent(self, event: Any) -> None:  # noqa: N802
         """Clear hover details when leaving the keyboard."""
         del event
         self._hovered_index = None
-        self.hover_detail_changed.emit("")
+        self.hover_info_changed.emit(None)
 
     def _load_geometry(self) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(ASSET_PATH.read_text(encoding="utf-8")))
@@ -170,6 +257,7 @@ class KeyboardWidget(QWidget):
                 self._labels[index] = ""
                 self._displays[index] = KeyDisplay()
                 self._led_colors[index] = None
+                self._key_contexts[index] = _KeyContext(source_key, None, inherited_layer_index)
                 continue
 
             display = self._display_for_effective_key(
@@ -182,12 +270,18 @@ class KeyboardWidget(QWidget):
             self._labels[index] = display.main
             self._displays[index] = display
             self._led_colors[index] = source_key.led_color if source_key is not None else effective_key.led_color
+            self._key_contexts[index] = _KeyContext(source_key, effective_key, inherited_layer_index)
             if effective_key.layer_action is not None:
                 self._layer_key_indexes.add(index)
                 if effective_key.layer_action.target_layer == self._active_layer:
                     self._layer_active_indexes.add(index)
 
         self.update()
+
+    def _layer_by_index(self, layer_index: int | None) -> Layer | None:
+        if layer_index is None or self._layout_model is None:
+            return None
+        return next((layer for layer in self._layout_model.layers if layer.index == layer_index), None)
 
     def _effective_key_for_index(self, active_layer: Layer, index: int) -> tuple[Key | None, Key | None, int | None]:
         source_key = active_layer.keys[index] if index < len(active_layer.keys) else None

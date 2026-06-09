@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
@@ -32,8 +32,11 @@ from moonmap.input.key_mapper import find_matching_keys, normalize_pynput_key
 from moonmap.layout.layer_state import LayerStateManager
 from moonmap.layout.models import Key, Layout
 from moonmap.layout.qmk_parser import parse_keymap_c
-from moonmap.ui.keyboard_widget import KeyboardWidget
+from moonmap.ui.key_tooltip import KeyTooltip
+from moonmap.ui.keyboard_widget import KeyHoverInfo, KeyboardWidget
 from moonmap.ui.layer_bar import LayerBar
+
+HOVER_TOOLTIP_DELAY_MS = 250
 
 
 class HookLike(Protocol):
@@ -79,6 +82,7 @@ class MainWindow(QMainWindow):
         self._layer_state = LayerStateManager()
         self._active_layer_index = 0
         self._pressed_keys: dict[str, PressedKeyState] = {}
+        self._pending_hover_info: KeyHoverInfo | None = None
         self._keyboard_signals = KeyboardSignals(self)
         self._keyboard_signals.pressed.connect(self._handle_hook_press)
         self._keyboard_signals.released.connect(self._handle_hook_release)
@@ -90,8 +94,13 @@ class MainWindow(QMainWindow):
 
         self._layer_bar = LayerBar(self)
         self._keyboard = KeyboardWidget(self)
+        self._key_tooltip = KeyTooltip(self)
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(HOVER_TOOLTIP_DELAY_MS)
+        self._hover_timer.timeout.connect(self._show_pending_hover_tooltip)
         self._keyboard.set_highlight_color(str(self._cfg["highlight_color"]))
-        self._keyboard.hover_detail_changed.connect(self._show_hover_detail)
+        self._keyboard.hover_info_changed.connect(self._handle_hover_info_changed)
         self._layer_bar.manual_layer_override.connect(self._set_active_layer)
 
         container = QWidget(self)
@@ -121,6 +130,7 @@ class MainWindow(QMainWindow):
         self._layout_model = layout
         self._layer_state.reset()
         self._pressed_keys.clear()
+        self._hide_hover_tooltip()
         self._keyboard.set_layout_model(layout)
         self._layer_bar.set_layers(layout.layers)
         self._set_active_layer(0)
@@ -139,6 +149,7 @@ class MainWindow(QMainWindow):
         config.save(self._cfg)
         if self._hook is not None:
             self._hook.stop()
+        self._hide_hover_tooltip()
         super().closeEvent(event)
 
     def _build_menu(self) -> None:
@@ -173,6 +184,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Could not load layout", str(exc))
 
     def _set_active_layer(self, layer_index: int) -> None:
+        self._hide_hover_tooltip()
         self._active_layer_index = layer_index
         self._keyboard.set_active_layer(layer_index)
         self._layer_bar.set_active_layer(layer_index)
@@ -290,8 +302,22 @@ class MainWindow(QMainWindow):
         assert status_bar is not None
         status_bar.showMessage(message)
 
-    def _show_hover_detail(self, message: str) -> None:
-        if message:
-            self._show_status(message)
-        else:
-            self._show_active_layer_status()
+    def _handle_hover_info_changed(self, info: object) -> None:
+        if not isinstance(info, KeyHoverInfo):
+            self._hide_hover_tooltip()
+            return
+
+        self._pending_hover_info = info
+        self._hover_timer.start()
+
+    def _show_pending_hover_tooltip(self) -> None:
+        if self._pending_hover_info is None:
+            return
+
+        self._key_tooltip.set_hover_info(self._pending_hover_info)
+        self._key_tooltip.show_near(self._keyboard.key_anchor_global_pos(self._pending_hover_info.index))
+
+    def _hide_hover_tooltip(self) -> None:
+        self._hover_timer.stop()
+        self._pending_hover_info = None
+        self._key_tooltip.hide()
