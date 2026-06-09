@@ -46,8 +46,32 @@ def test_sample_oryx_ledmap_is_imported_as_per_key_rgb() -> None:
     layout = parse_keymap_c(SAMPLE_KEYMAP)
 
     assert layout.layers[0].keys[0].led_color == (108, 0, 255)
-    assert layout.layers[0].keys[7].led_color == (0, 114, 255)
+    assert layout.layers[0].keys[18].code == "KC_R"
+    assert layout.layers[0].keys[19].code == "KC_T"
+    assert layout.layers[0].keys[18].led_color == (0, 114, 255)
+    assert layout.layers[0].keys[19].led_color == (0, 114, 255)
+    assert layout.layers[0].keys[20].code == "KC_7"
+    assert layout.layers[0].keys[20].led_color == (0, 255, 102)
     assert layout.layers[4].keys[71].led_color == (255, 150, 0)
+
+
+def test_ledmap_is_skipped_when_led_count_does_not_match(tmp_path: Path) -> None:
+    keymap = tmp_path / "keymap.c"
+    keymap.write_text(
+        """
+        const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+          [0] = LAYOUT_moonlander(KC_A)
+        };
+        const uint8_t PROGMEM ledmap[][RGB_MATRIX_LED_COUNT][3] = {
+          [0] = { {188,255,255} },
+        };
+        """,
+        encoding="utf-8",
+    )
+
+    key = parse_keymap_c(keymap).layers[0].keys[0]
+
+    assert key.led_color is None
 
 
 def test_display_splits_shift_tap_and_hold_legends() -> None:
@@ -107,6 +131,52 @@ def test_only_mo_and_tg_create_layer_actions(tmp_path: Path) -> None:
     assert layer.keys[1].layer_action.type == "TG"
     assert layer.keys[1].layer_action.target_layer == TG_TARGET_LAYER
     assert [key.layer_action for key in layer.keys[2:]] == [None, None, None, None]
+
+
+def test_enum_layer_headers_use_explicit_enum_names(tmp_path: Path) -> None:
+    keymap = tmp_path / "keymap.c"
+    keymap.write_text(
+        """
+        enum layers {
+          BASE,
+          NAV = 3,
+          SYM,
+        };
+
+        const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+          [BASE] = LAYOUT_moonlander(KC_A),
+          [NAV] = LAYOUT_moonlander(KC_B),
+          [SYM] = LAYOUT_moonlander(KC_C),
+        };
+        """,
+        encoding="utf-8",
+    )
+
+    layout = parse_keymap_c(keymap)
+
+    assert [(layer.index, layer.name, layer.keys[0].code) for layer in layout.layers] == [
+        (0, "BASE", "KC_A"),
+        (3, "NAV", "KC_B"),
+        (4, "SYM", "KC_C"),
+    ]
+
+
+def test_same_line_comment_overrides_default_layer_name(tmp_path: Path) -> None:
+    keymap = tmp_path / "keymap.c"
+    keymap.write_text(
+        """
+        const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+          [0] = LAYOUT_moonlander( // BASE
+            KC_A
+          ),
+        };
+        """,
+        encoding="utf-8",
+    )
+
+    layer = parse_keymap_c(keymap).layers[0]
+
+    assert layer.name == "BASE"
 
 
 def test_inline_and_block_comments_are_ignored(tmp_path: Path) -> None:

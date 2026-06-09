@@ -29,8 +29,8 @@ from .models import Key, KeyDisplay, Layer, LayerAction, Layout, RgbColor
 # Matches: MO(n) or TG(n)
 _LAYER_ACTION_RE = re.compile(r"^(MO|TG)\((\d+)\)$")
 
-# Matches: [n] = LAYOUT_moonlander(  with optional comment on prior line
-_LAYER_HEADER_RE = re.compile(r"\[(\d+)\]\s*=\s*LAYOUT_moonlander\s*\(")
+# Matches: [n] = LAYOUT_moonlander( or [BASE] = LAYOUT_moonlander(
+_LAYER_HEADER_RE = re.compile(r"\[([A-Za-z_][A-Za-z0-9_]*|\d+)\]\s*=\s*LAYOUT_moonlander\s*\(")
 
 # Matches a comment line like: // BASE or /* NAV */
 _COMMENT_RE = re.compile(r"//\s*(\w+)|/\*\s*(\w+)\s*\*/")
@@ -39,6 +39,81 @@ _DUAL_FUNC_DEFINE_RE = re.compile(r"^#define\s+(DUAL_FUNC_\d+)\s+(.+)$", re.MULT
 _CASE_RE = re.compile(r"case\s+(DUAL_FUNC_\d+)\s*:")
 _TRIPLE_RE = re.compile(r"\{\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\}")
 _WRAPPER_ARG_COUNT = 2
+_MOONLANDER_KEY_COUNT = 72
+_MOONLANDER_KEY_TO_LED_INDEX = (
+    0,
+    5,
+    10,
+    15,
+    20,
+    25,
+    29,
+    65,
+    61,
+    56,
+    51,
+    46,
+    41,
+    36,
+    1,
+    6,
+    11,
+    16,
+    21,
+    26,
+    30,
+    66,
+    62,
+    57,
+    52,
+    47,
+    42,
+    37,
+    2,
+    7,
+    12,
+    17,
+    22,
+    27,
+    31,
+    67,
+    63,
+    58,
+    53,
+    48,
+    43,
+    38,
+    3,
+    8,
+    13,
+    18,
+    23,
+    28,
+    64,
+    59,
+    54,
+    49,
+    44,
+    39,
+    4,
+    9,
+    14,
+    19,
+    24,
+    35,
+    71,
+    60,
+    55,
+    50,
+    45,
+    40,
+    32,
+    33,
+    34,
+    70,
+    69,
+    68,
+)
 
 _SHIFTED_SYMBOLS = {
     "KC_GRAVE": "~",
@@ -502,6 +577,43 @@ def _parse_dual_behaviors(text: str) -> dict[str, _DualBehavior]:
     return behaviors
 
 
+def _parse_layer_enums(text: str) -> dict[str, int]:
+    """Parse simple QMK layer enum constants."""
+    enum_values: dict[str, int] = {}
+    for enum_body in re.findall(r"enum(?:\s+\w+)?\s*\{(.*?)\};", text, flags=re.DOTALL):
+        next_value = 0
+        for token in _split_top_level_commas(_strip_c_comments(enum_body)):
+            item = token.strip()
+            if not item:
+                continue
+            match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*(\d+))?$", item)
+            if match is None:
+                continue
+            name = match.group(1)
+            explicit_value = match.group(2)
+            value = int(explicit_value) if explicit_value is not None else next_value
+            enum_values[name] = value
+            next_value = value + 1
+    return enum_values
+
+
+def _resolve_layer_header(identifier: str, layer_enums: dict[str, int]) -> tuple[int, str | None] | None:
+    if identifier.isdigit():
+        return int(identifier), None
+    layer_index = layer_enums.get(identifier)
+    if layer_index is None:
+        return None
+    return layer_index, identifier
+
+
+def _layer_name_from_comments(lines: list[str], line_index: int) -> str | None:
+    for candidate in (lines[line_index], lines[line_index - 1] if line_index > 0 else ""):
+        comment_match = _COMMENT_RE.search(candidate)
+        if comment_match:
+            return comment_match.group(1) or comment_match.group(2)
+    return None
+
+
 def _split_tap_hold_sections(section: str) -> tuple[str, str] | tuple[None, None]:
     tap_marker = "record->tap.count > 0"
     tap_pos = section.find(tap_marker)
@@ -622,6 +734,7 @@ def parse_keymap_c(path: str | Path) -> Layout:
     path = Path(path)
     text = path.read_text(encoding="utf-8", errors="replace")
     dual_behaviors = _parse_dual_behaviors(text)
+    layer_enums = _parse_layer_enums(text)
     ledmap = _parse_ledmap(text)
     display_overrides = _load_display_overrides(path)
 
@@ -638,14 +751,13 @@ def parse_keymap_c(path: str | Path) -> Layout:
         line = lines[i].strip()
         m = _LAYER_HEADER_RE.search(line)
         if m:
-            layer_idx = int(m.group(1))
+            resolved_layer = _resolve_layer_header(m.group(1), layer_enums)
+            if resolved_layer is None:
+                i += 1
+                continue
+            layer_idx, enum_name = resolved_layer
 
-            # Try to grab a name from the comment on the preceding line
-            name = f"Layer {layer_idx}"
-            if i > 0:
-                cm = _COMMENT_RE.search(lines[i - 1])
-                if cm:
-                    name = cm.group(1) or cm.group(2) or name
+            name = _layer_name_from_comments(lines, i) or enum_name or f"Layer {layer_idx}"
 
             # Collect everything until the closing paren of this LAYOUT call
             # (handle nested parens for things like LT(1, KC_SPC))
@@ -698,12 +810,15 @@ def parse_keymap_c(path: str | Path) -> Layout:
 
 
 def _apply_ledmap(layers: list[Layer], ledmap: dict[int, list[RgbColor]]) -> None:
+    if len(_MOONLANDER_KEY_TO_LED_INDEX) != _MOONLANDER_KEY_COUNT:
+        return
+
     for layer in layers:
         colors = ledmap.get(layer.index)
-        if colors is None or len(colors) != len(layer.keys):
+        if colors is None or len(colors) != _MOONLANDER_KEY_COUNT or len(layer.keys) != _MOONLANDER_KEY_COUNT:
             continue
-        for key, color in zip(layer.keys, colors, strict=True):
-            key.led_color = color
+        for key in layer.keys:
+            key.led_color = colors[_MOONLANDER_KEY_TO_LED_INDEX[key.index]]
 
 
 def _load_display_overrides(keymap_path: Path) -> dict[str, Any]:
