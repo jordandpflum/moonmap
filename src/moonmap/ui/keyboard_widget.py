@@ -10,14 +10,15 @@ Highlights individual keys on press/release via update_key_state().
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, cast
 
-from PyQt6.QtCore import QSize
-from PyQt6.QtGui import QPaintEvent, QPainter
+from PyQt6.QtCore import QPointF, QSize, pyqtSignal
+from PyQt6.QtGui import QColor, QPaintEvent, QPainter
 from PyQt6.QtWidgets import QWidget
 
-from moonmap.layout.models import Layout
+from moonmap.layout.models import KeyDisplay, Layout, RgbColor
 from moonmap.ui.key_widget import KeyPaintState, draw_key
 
 ASSET_PATH = Path(__file__).resolve().parents[1] / "assets" / "moonlander_layout.json"
@@ -25,6 +26,8 @@ ASSET_PATH = Path(__file__).resolve().parents[1] / "assets" / "moonlander_layout
 
 class KeyboardWidget(QWidget):
     """Render the Moonlander physical key layout."""
+
+    hover_detail_changed = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the keyboard widget."""
@@ -36,11 +39,15 @@ class KeyboardWidget(QWidget):
             int(key_info["index"]): key_info for key_info in self._geometry_data["keys"]
         }
         self._labels: dict[int, str] = {index: "" for index in self._key_geometry}
+        self._displays: dict[int, KeyDisplay] = {index: KeyDisplay() for index in self._key_geometry}
+        self._led_colors: dict[int, RgbColor | None] = {index: None for index in self._key_geometry}
         self._layer_key_indexes: set[int] = set()
         self._layer_active_indexes: set[int] = set()
         self._pressed_indexes: set[int] = set()
         self._highlight_color = "#4FC3F7"
+        self._hovered_index: int | None = None
 
+        self.setMouseTracking(True)
         self.setMinimumSize(self.canvas_size)
         self.setFixedSize(self.canvas_size)
 
@@ -96,6 +103,7 @@ class KeyboardWidget(QWidget):
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
 
         for index in sorted(self._key_geometry):
             key_info = self._key_geometry[index]
@@ -109,6 +117,8 @@ class KeyboardWidget(QWidget):
                 shape=cast(str | None, key_info.get("shape")),
                 state=KeyPaintState(
                     label=self._labels[index],
+                    display=self._displays[index],
+                    led_color=self._led_colors[index],
                     is_pressed=index in self._pressed_indexes,
                     is_layer_key=index in self._layer_key_indexes,
                     is_layer_active=index in self._layer_active_indexes,
@@ -116,6 +126,24 @@ class KeyboardWidget(QWidget):
                 ),
             )
             painter.restore()
+
+    def mouseMoveEvent(self, event: Any) -> None:  # noqa: N802
+        """Emit hover details for the key under the cursor."""
+        index = self._key_index_at(event.position())
+        if index == self._hovered_index:
+            return
+        self._hovered_index = index
+        if index is None:
+            self.hover_detail_changed.emit("")
+            return
+        detail = self._displays[index].detail or self._labels[index]
+        self.hover_detail_changed.emit(f"Key {index}: {detail}" if detail else f"Key {index}")
+
+    def leaveEvent(self, event: Any) -> None:  # noqa: N802
+        """Clear hover details when leaving the keyboard."""
+        del event
+        self._hovered_index = None
+        self.hover_detail_changed.emit("")
 
     def _load_geometry(self) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(ASSET_PATH.read_text(encoding="utf-8")))
@@ -137,12 +165,32 @@ class KeyboardWidget(QWidget):
                 key = active_layer.keys[index]
             if key is None:
                 self._labels[index] = ""
+                self._displays[index] = KeyDisplay()
+                self._led_colors[index] = None
                 continue
 
             self._labels[index] = key.label
+            self._displays[index] = key.display
+            self._led_colors[index] = key.led_color
             if key.layer_action is not None:
                 self._layer_key_indexes.add(index)
                 if key.layer_action.target_layer == self._active_layer:
                     self._layer_active_indexes.add(index)
 
         self.update()
+
+    def _key_index_at(self, point: QPointF) -> int | None:
+        for index in reversed(sorted(self._key_geometry)):
+            key_info = self._key_geometry[index]
+            center_x = float(key_info["cx"])
+            center_y = float(key_info["cy"])
+            width = float(key_info["w"])
+            height = float(key_info["h"])
+            angle = -math.radians(float(key_info.get("rotation_degrees", 0)))
+            dx = point.x() - center_x
+            dy = point.y() - center_y
+            local_x = dx * math.cos(angle) - dy * math.sin(angle)
+            local_y = dx * math.sin(angle) + dy * math.cos(angle)
+            if -width / 2 <= local_x <= width / 2 and -height / 2 <= local_y <= height / 2:
+                return index
+        return None

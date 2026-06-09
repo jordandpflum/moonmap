@@ -42,6 +42,39 @@ def test_nested_qmk_calls_stay_single_physical_key_tokens() -> None:
     assert layer.keys[71].code == "MT(MOD_RALT, KC_BSPC)"
 
 
+def test_sample_oryx_ledmap_is_imported_as_per_key_rgb() -> None:
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+
+    assert layout.layers[0].keys[0].led_color == (108, 0, 255)
+    assert layout.layers[0].keys[7].led_color == (0, 114, 255)
+    assert layout.layers[4].keys[71].led_color == (255, 150, 0)
+
+
+def test_display_splits_shift_tap_and_hold_legends() -> None:
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    layer = layout.layers[0]
+
+    assert layer.keys[60].display.main == "⏎"
+    assert layer.keys[60].display.hold == "L4"
+    assert layer.keys[62].display.main == "↓"
+    assert layer.keys[63].display.main == "↑"
+    assert layer.keys[71].display.main == "⌫"
+    assert layer.keys[71].display.hold == "RAlt"
+    assert layer.keys[52].display.shifted == "?"
+
+
+def test_oryx_dual_function_cases_are_displayed_as_tap_hold() -> None:
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+
+    dual_key = layout.layers[0].keys[55]
+
+    assert dual_key.code == "DUAL_FUNC_0"
+    assert dual_key.display.main == "Ctl+`"
+    assert dual_key.display.hold == "Ctl+V"
+    assert "tap raw: LCTL(KC_GRAVE)" in dual_key.display.detail
+    assert "hold raw: LCTL(KC_V)" in dual_key.display.detail
+
+
 def test_only_mo_and_tg_create_layer_actions(tmp_path: Path) -> None:
     keymap = tmp_path / "keymap.c"
     keymap.write_text(

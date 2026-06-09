@@ -5,12 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+RgbColor = tuple[int, int, int]
+
+
 @dataclass
 class LayerAction:
     """Describes a layer-switching action on a key."""
 
     type: str  # "MO" or "TG"
     target_layer: int
+
+
+@dataclass(frozen=True)
+class KeyDisplay:
+    """Readable display metadata for a key."""
+
+    main: str = ""
+    shifted: str = ""
+    hold: str = ""
+    detail: str = ""
 
 
 @dataclass
@@ -21,6 +34,8 @@ class Key:
     label: str  # Human-readable label, e.g. "A", "MO(1)", "LCTL"
     code: str  # Raw QMK keycode string from keymap.c
     layer_action: LayerAction | None = None  # None if not a layer-switching key
+    display: KeyDisplay = field(default_factory=KeyDisplay)
+    led_color: RgbColor | None = None
 
 
 @dataclass

@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self._layer_bar = LayerBar(self)
         self._keyboard = KeyboardWidget(self)
         self._keyboard.set_highlight_color(str(self._cfg["highlight_color"]))
+        self._keyboard.hover_detail_changed.connect(self._show_hover_detail)
         self._layer_bar.manual_layer_override.connect(self._set_active_layer)
 
         container = QWidget(self)
@@ -175,18 +176,18 @@ class MainWindow(QMainWindow):
         self._active_layer_index = layer_index
         self._keyboard.set_active_layer(layer_index)
         self._layer_bar.set_active_layer(layer_index)
-        status_bar = self.statusBar()
-        assert status_bar is not None
+        self._show_active_layer_status()
 
+    def _show_active_layer_status(self) -> None:
         if self._layout_model is None:
-            status_bar.showMessage("Load a keymap.c to render your Moonlander layout")
+            self._show_status("Load a keymap.c to render your Moonlander layout")
             return
 
-        layer = next((item for item in self._layout_model.layers if item.index == layer_index), None)
+        layer = next((item for item in self._layout_model.layers if item.index == self._active_layer_index), None)
         if layer is None:
-            status_bar.showMessage(f"Layer {layer_index}")
+            self._show_status(f"Layer {self._active_layer_index}")
         else:
-            status_bar.showMessage(f"Layer {layer.index} - {layer.name}")
+            self._show_status(f"Layer {layer.index} - {layer.name}")
 
     def _restore_window_geometry(self) -> None:
         geometry = self._cfg.get("window_geometry")
@@ -301,3 +302,9 @@ class MainWindow(QMainWindow):
         status_bar = self.statusBar()
         assert status_bar is not None
         status_bar.showMessage(message)
+
+    def _show_hover_detail(self, message: str) -> None:
+        if message:
+            self._show_status(message)
+        else:
+            self._show_active_layer_status()
