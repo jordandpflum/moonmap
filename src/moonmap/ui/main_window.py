@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QMainWindow
 class MainWindow(QMainWindow):
     """Main application window."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the main application window."""
         super().__init__()
         self.setWindowTitle("Moonlander Visualizer")

@@ -12,7 +12,7 @@ from .models import Key
 class LayerStateManager:
     """Track active layers from MO and TG key actions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize empty momentary and toggle layer state."""
         self._mo_stack: list[int] = []  # layers active while MO key is held
         self._tg_set: set[int] = set()  # layers toggled on/off

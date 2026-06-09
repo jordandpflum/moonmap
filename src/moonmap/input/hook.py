@@ -14,13 +14,20 @@ this runs on a non-Qt thread.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from pynput import keyboard
 
 
 class KeyboardHook:
     """Manage a background pynput listener for keyboard events."""
 
-    def __init__(self, on_press_cb=None, on_release_cb=None):
+    def __init__(
+        self,
+        on_press_cb: Callable[[Any], None] | None = None,
+        on_release_cb: Callable[[Any], None] | None = None,
+    ) -> None:
         """Create a hook with optional press and release callbacks."""
         self._on_press = on_press_cb
         self._on_release = on_release_cb
@@ -40,10 +47,10 @@ class KeyboardHook:
             self._listener.stop()
             self._listener = None
 
-    def _handle_press(self, key) -> None:
+    def _handle_press(self, key: Any) -> None:
         if self._on_press:
             self._on_press(key)
 
-    def _handle_release(self, key) -> None:
+    def _handle_release(self, key: Any) -> None:
         if self._on_release:
             self._on_release(key)

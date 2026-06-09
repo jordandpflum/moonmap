@@ -33,6 +33,40 @@ _LAYER_HEADER_RE = re.compile(r"\[(\d+)\]\s*=\s*LAYOUT_moonlander\s*\(")
 _COMMENT_RE = re.compile(r"//\s*(\w+)|/\*\s*(\w+)\s*\*/")
 
 
+def _strip_c_comments(text: str) -> str:
+    """Replace C comments with whitespace."""
+    text = re.sub(r"//[^\n]*", " ", text)
+    return re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split QMK macro arguments without splitting nested function arguments."""
+    tokens: list[str] = []
+    current: list[str] = []
+    depth = 0
+
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth > 0:
+            depth -= 1
+
+        if char == "," and depth == 0:
+            token = "".join(current).strip()
+            if token:
+                tokens.append(token)
+            current = []
+            continue
+
+        current.append(char)
+
+    token = "".join(current).strip()
+    if token:
+        tokens.append(token)
+
+    return tokens
+
+
 def _parse_layer_action(code: str) -> LayerAction | None:
     m = _LAYER_ACTION_RE.match(code.strip())
     if m:
@@ -136,15 +170,14 @@ def parse_keymap_c(path: str | Path) -> Layout:
                 depth += body_line.count("(") - body_line.count(")")
                 j += 1
 
-            # Flatten to a single string and split on commas
-            body = " ".join(body_lines)
+            # Strip comments before flattening so `//` comments stay line-scoped.
+            body = _strip_c_comments("\n".join(body_lines))
+            # Flatten to a single string and split on top-level commas.
+            body = " ".join(body.splitlines())
             # Strip the final closing paren
             body = body.rsplit(")", 1)[0]
-            # Remove C comments within the body
-            body = re.sub(r"//[^\n]*", " ", body)
-            body = re.sub(r"/\*.*?\*/", " ", body, flags=re.DOTALL)
 
-            raw_codes = [c.strip() for c in body.split(",") if c.strip()]
+            raw_codes = _split_top_level_commas(body)
 
             keys: list[Key] = []
             for idx, code in enumerate(raw_codes):

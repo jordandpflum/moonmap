@@ -5,10 +5,11 @@ from __future__ import annotations
 import sys
 
 from PyQt6.QtWidgets import QApplication
-from ui.main_window import MainWindow
+
+from moonmap.ui.main_window import MainWindow
 
 
-def main():
+def main() -> None:
     """Run the Moonlander Visualizer Qt application."""
     app = QApplication(sys.argv)
     app.setApplicationName("Moonlander Visualizer")
