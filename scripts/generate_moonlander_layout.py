@@ -117,7 +117,7 @@ def build_layout() -> dict[str, Any]:
     for row_index in range(5):
         for key in left_rows[row_index]:
             keys.append(key)
-        for key in right_rows[row_index]:
+        for key in reversed(right_rows[row_index]):
             keys.append(key)
 
     keys.extend(_thumb_positions(left_to_right=True))
