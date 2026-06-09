@@ -141,6 +141,7 @@ common/tags
 
 # random
 .history
+*:Zone.Identifier
 
 # Lazy Git
 lazygit
