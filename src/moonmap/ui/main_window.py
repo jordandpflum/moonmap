@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 
 from moonmap import config
 from moonmap.input.hook import KeyboardHook
-from moonmap.input.key_mapper import find_matching_key_indexes, normalize_pynput_key
+from moonmap.input.key_mapper import find_matching_keys, normalize_pynput_key
 from moonmap.layout.layer_state import LayerStateManager
 from moonmap.layout.models import Key, Layout
 from moonmap.layout.qmk_parser import parse_keymap_c
@@ -265,24 +265,11 @@ class MainWindow(QMainWindow):
         if self._layout_model is None:
             return []
 
-        layer = next(
-            (
-                candidate
-                for candidate in self._layout_model.layers
-                if candidate.index == self._active_layer_index
-            ),
-            None,
-        )
-        if layer is None:
-            return []
-
-        indexes = find_matching_key_indexes(
+        return find_matching_keys(
             self._layout_model,
             self._active_layer_index,
             normalized_code,
         )
-        index_set = set(indexes)
-        return [key for key in layer.keys if key.index in index_set]
 
     def _show_hook_error(self, message: str) -> None:
         self._show_status(f"Keyboard hook unavailable: {message}")
