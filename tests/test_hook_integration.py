@@ -47,10 +47,14 @@ def test_hook_press_and_release_highlight_matching_indexes() -> None:
     window._handle_hook_press(keyboard.KeyCode.from_char("a"))
 
     assert window._keyboard.pressed_indexes() == [29]
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage() == "Key down: KC_A; layer 0; matches: 29"
 
     window._handle_hook_release(keyboard.KeyCode.from_char("a"))
 
     assert window._keyboard.pressed_indexes() == []
+    assert status_bar.currentMessage() == "Key up: KC_A; layer 0; matches: 29"
 
 
 def test_hook_press_highlights_all_duplicate_matches() -> None:
@@ -80,6 +84,19 @@ def test_press_without_loaded_layout_is_noop() -> None:
     window._handle_hook_press(keyboard.KeyCode.from_char("a"))
 
     assert window._keyboard.pressed_indexes() == []
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage() == "Key down: KC_A; no layout loaded"
+
+
+def test_unsupported_event_reports_status() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+
+    window._handle_hook_press(object())
+
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage().startswith("Key down ignored: unsupported event")
 
 
 def test_observable_mo_action_updates_active_layer_and_resets_on_release() -> None:

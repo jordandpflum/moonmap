@@ -204,17 +204,24 @@ class MainWindow(QMainWindow):
 
         try:
             self._hook.start()
+            self._show_status("Keyboard hook active")
         except Exception as exc:  # noqa: BLE001
             self._keyboard_signals.hook_error.emit(str(exc))
 
     def _handle_hook_press(self, raw_key: Any) -> None:
         normalized_code = normalize_pynput_key(raw_key)
-        if normalized_code is None or normalized_code in self._pressed_keys:
+        if normalized_code is None:
+            self._show_status(f"Key down ignored: unsupported event {raw_key!r}")
+            return
+
+        if normalized_code in self._pressed_keys:
             return
 
         matched_keys = self._matching_keys(normalized_code)
         indexes = [key.index for key in matched_keys]
         self._pressed_keys[normalized_code] = PressedKeyState(indexes=indexes, keys=matched_keys)
+
+        self._show_key_diagnostic("down", normalized_code, indexes)
 
         for index in indexes:
             self._keyboard.update_key_state(index, True)
@@ -231,10 +238,12 @@ class MainWindow(QMainWindow):
     def _handle_hook_release(self, raw_key: Any) -> None:
         normalized_code = normalize_pynput_key(raw_key)
         if normalized_code is None:
+            self._show_status(f"Key up ignored: unsupported event {raw_key!r}")
             return
 
         pressed_state = self._pressed_keys.pop(normalized_code, None)
         if pressed_state is None:
+            self._show_key_diagnostic("up", normalized_code, [])
             return
 
         for index in pressed_state.indexes:
@@ -248,6 +257,8 @@ class MainWindow(QMainWindow):
 
         if layer_changed:
             self._set_active_layer(self._layer_state.active_layer())
+        else:
+            self._show_key_diagnostic("up", normalized_code, pressed_state.indexes)
 
     def _matching_keys(self, normalized_code: str) -> list[Key]:
         if self._layout_model is None:
@@ -273,6 +284,20 @@ class MainWindow(QMainWindow):
         return [key for key in layer.keys if key.index in index_set]
 
     def _show_hook_error(self, message: str) -> None:
+        self._show_status(f"Keyboard hook unavailable: {message}")
+
+    def _show_key_diagnostic(self, event_name: str, normalized_code: str, indexes: list[int]) -> None:
+        if self._layout_model is None:
+            self._show_status(f"Key {event_name}: {normalized_code}; no layout loaded")
+            return
+
+        match_text = ", ".join(str(index) for index in indexes) if indexes else "none"
+        self._show_status(
+            f"Key {event_name}: {normalized_code}; layer {self._active_layer_index}; "
+            f"matches: {match_text}",
+        )
+
+    def _show_status(self, message: str) -> None:
         status_bar = self.statusBar()
         assert status_bar is not None
-        status_bar.showMessage(f"Keyboard hook unavailable: {message}")
+        status_bar.showMessage(message)
