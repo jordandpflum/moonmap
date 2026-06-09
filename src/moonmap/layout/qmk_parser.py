@@ -142,6 +142,8 @@ _SHIFTED_SYMBOLS = {
 }
 
 _ALIASES = {
+    "_______": "KC_TRNS",
+    "XXXXXXX": "KC_NO",
     "KC_TRANSPARENT": "KC_TRNS",
     "KC_SPACE": "KC_SPC",
     "KC_ENTER": "KC_ENT",
@@ -421,6 +423,10 @@ def _make_display(code: str, dual_behaviors: dict[str, _DualBehavior]) -> KeyDis
             detail=_detail(raw_code, main=main, hold=hold),
         )
 
+    keypad_display = _make_keypad_display(raw_code)
+    if keypad_display is not None:
+        return keypad_display
+
     main = _compact_code_label(raw_code)
     return KeyDisplay(
         main=main,
@@ -480,6 +486,29 @@ def _compact_action_label(code: str) -> str:
         main, modifiers = chord
         return f"{modifiers}+{main}"
     return _compact_code_label(code)
+
+
+def _make_keypad_display(code: str) -> KeyDisplay | None:
+    raw_code = code.strip()
+    code = _canonical_code(raw_code)
+
+    digit_match = re.match(r"^KC_KP_(\d)$", code)
+    if digit_match:
+        main = digit_match.group(1)
+        return KeyDisplay(main=main, hold="KP", detail=_detail(raw_code, main=main, hold="keypad"))
+
+    keypad_symbols = {
+        "KC_KP_SLASH": "/",
+        "KC_KP_ASTERISK": "*",
+        "KC_KP_MINUS": "-",
+        "KC_KP_PLUS": "+",
+        "KC_KP_ENTER": "⏎",
+        "KC_KP_DOT": ".",
+    }
+    main = keypad_symbols.get(code)
+    if main is None:
+        return None
+    return KeyDisplay(main=main, hold="KP", detail=_detail(raw_code, main=main, hold="keypad"))
 
 
 def _compact_hold_label(code: str) -> str:

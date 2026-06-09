@@ -87,6 +87,38 @@ def test_display_splits_shift_tap_and_hold_legends() -> None:
     assert layer.keys[52].display.shifted == "?"
 
 
+def test_keypad_keycodes_keep_keycap_labels_compact() -> None:
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    layer = layout.layers[2]
+
+    assert layer.keys[17].code == "KC_KP_7"
+    assert layer.keys[17].display.main == "7"
+    assert layer.keys[17].display.hold == "KP"
+    assert layer.keys[9].code == "KC_KP_SLASH"
+    assert layer.keys[9].display.main == "/"
+    assert layer.keys[9].display.hold == "KP"
+    assert "Raw: KC_KP_7" in layer.keys[17].display.detail
+
+
+def test_qmk_transparent_and_no_short_aliases_are_supported(tmp_path: Path) -> None:
+    keymap = tmp_path / "keymap.c"
+    keymap.write_text(
+        """
+        const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+          [0] = LAYOUT_moonlander(_______, XXXXXXX),
+        };
+        """,
+        encoding="utf-8",
+    )
+
+    layer = parse_keymap_c(keymap).layers[0]
+
+    assert layer.keys[0].code == "_______"
+    assert layer.keys[0].display.main == ""
+    assert layer.keys[1].code == "XXXXXXX"
+    assert layer.keys[1].display.main == "x"
+
+
 def test_oryx_dual_function_cases_are_displayed_as_tap_hold() -> None:
     layout = parse_keymap_c(SAMPLE_KEYMAP)
 

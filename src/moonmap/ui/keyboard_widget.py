@@ -18,10 +18,11 @@ from PyQt6.QtCore import QPointF, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QPaintEvent, QPainter
 from PyQt6.QtWidgets import QWidget
 
-from moonmap.layout.models import KeyDisplay, Layout, RgbColor
+from moonmap.layout.models import Key, KeyDisplay, Layer, Layout, RgbColor
 from moonmap.ui.key_widget import KeyPaintState, draw_key
 
 ASSET_PATH = Path(__file__).resolve().parents[1] / "assets" / "moonlander_layout.json"
+TRANSPARENT_CODES = {"_______", "KC_TRANSPARENT", "KC_TRNS"}
 
 
 class KeyboardWidget(QWidget):
@@ -160,24 +161,79 @@ class KeyboardWidget(QWidget):
         self._layer_active_indexes.clear()
 
         for index in self._key_geometry:
-            key = None
-            if active_layer is not None and index < len(active_layer.keys):
-                key = active_layer.keys[index]
-            if key is None:
+            source_key = None
+            effective_key = None
+            inherited_layer_index = None
+            if active_layer is not None:
+                source_key, effective_key, inherited_layer_index = self._effective_key_for_index(active_layer, index)
+            if effective_key is None:
                 self._labels[index] = ""
                 self._displays[index] = KeyDisplay()
                 self._led_colors[index] = None
                 continue
 
-            self._labels[index] = key.label
-            self._displays[index] = key.display
-            self._led_colors[index] = key.led_color
-            if key.layer_action is not None:
+            display = self._display_for_effective_key(
+                source_key=source_key,
+                effective_key=effective_key,
+                active_layer_index=active_layer.index if active_layer is not None else self._active_layer,
+                inherited_layer_index=inherited_layer_index,
+            )
+
+            self._labels[index] = display.main
+            self._displays[index] = display
+            self._led_colors[index] = source_key.led_color if source_key is not None else effective_key.led_color
+            if effective_key.layer_action is not None:
                 self._layer_key_indexes.add(index)
-                if key.layer_action.target_layer == self._active_layer:
+                if effective_key.layer_action.target_layer == self._active_layer:
                     self._layer_active_indexes.add(index)
 
         self.update()
+
+    def _effective_key_for_index(self, active_layer: Layer, index: int) -> tuple[Key | None, Key | None, int | None]:
+        source_key = active_layer.keys[index] if index < len(active_layer.keys) else None
+        if source_key is not None and not _is_transparent(source_key):
+            return source_key, source_key, None
+
+        if self._layout_model is None:
+            return source_key, source_key, None
+
+        lower_layers = sorted(
+            (layer for layer in self._layout_model.layers if layer.index < active_layer.index),
+            key=lambda layer: layer.index,
+            reverse=True,
+        )
+        for layer in lower_layers:
+            if index >= len(layer.keys):
+                continue
+            candidate = layer.keys[index]
+            if not _is_transparent(candidate):
+                return source_key, candidate, layer.index
+
+        return source_key, source_key, None
+
+    def _display_for_effective_key(
+        self,
+        *,
+        source_key: Key | None,
+        effective_key: Key,
+        active_layer_index: int,
+        inherited_layer_index: int | None,
+    ) -> KeyDisplay:
+        display = effective_key.display
+        if source_key is None or not _is_transparent(source_key) or inherited_layer_index is None:
+            return display
+
+        inherited_detail = (
+            f"Transparent on layer {active_layer_index}; "
+            f"inherits layer {inherited_layer_index} key {effective_key.index}: {effective_key.code}"
+        )
+        detail = f"{inherited_detail}; {display.detail}" if display.detail else inherited_detail
+        return KeyDisplay(
+            main=display.main,
+            shifted=display.shifted,
+            hold=display.hold,
+            detail=detail,
+        )
 
     def _key_index_at(self, point: QPointF) -> int | None:
         for index in reversed(sorted(self._key_geometry)):
@@ -194,3 +250,7 @@ class KeyboardWidget(QWidget):
             if -width / 2 <= local_x <= width / 2 and -height / 2 <= local_y <= height / 2:
                 return index
         return None
+
+
+def _is_transparent(key: Key) -> bool:
+    return key.code.strip() in TRANSPARENT_CODES

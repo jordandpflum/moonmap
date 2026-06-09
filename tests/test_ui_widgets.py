@@ -33,7 +33,20 @@ def test_keyboard_widget_renders_72_keys_and_updates_labels() -> None:
 
     widget.set_active_layer(1)
 
-    assert widget.label_for_key(0) == ""
+    assert widget.label_for_key(0) == "`"
+
+
+def test_keyboard_widget_resolves_transparent_keys_to_lower_layers() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+
+    widget.set_layout_model(layout)
+    widget.set_active_layer(1)
+
+    assert layout.layers[1].keys[0].code == "KC_TRANSPARENT"
+    assert widget.label_for_key(0) == "`"
+    assert "Transparent on layer 1" in widget._displays[0].detail
+    assert "inherits layer 0 key 0: KC_GRAVE" in widget._displays[0].detail
 
 
 def test_keyboard_widget_exposes_hover_detail_for_compact_labels() -> None:
