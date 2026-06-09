@@ -376,8 +376,10 @@ def _make_display(code: str, dual_behaviors: dict[str, _DualBehavior]) -> KeyDis
     if behavior is not None:
         main = _compact_action_label(behavior.get("tap", ""))
         hold = _compact_hold_label(behavior.get("hold", ""))
-        detail = _detail(raw_code, main=main, hold=hold, tap_raw=behavior.get("tap", ""), hold_raw=behavior.get("hold", ""))
-        return KeyDisplay(main=main, hold=hold, detail=detail)
+        tap_raw = behavior.get("tap", "")
+        hold_raw = behavior.get("hold", "")
+        detail = _detail(raw_code, main=main, hold=hold, tap_raw=tap_raw, hold_raw=hold_raw)
+        return KeyDisplay(main=main, hold=hold, detail=detail, tap_raw=tap_raw, hold_raw=hold_raw)
 
     if raw_code.startswith("LT(") and raw_code.endswith(")"):
         args = _split_top_level_commas(raw_code[3:-1])
@@ -389,6 +391,8 @@ def _make_display(code: str, dual_behaviors: dict[str, _DualBehavior]) -> KeyDis
                 shifted=_shifted_for_code(args[1]),
                 hold=hold,
                 detail=_detail(raw_code, main=main, hold=hold, tap_raw=args[1], hold_raw=f"Layer {args[0].strip()}"),
+                tap_raw=args[1],
+                hold_raw=f"Layer {args[0].strip()}",
             )
 
     if raw_code.startswith("MT(") and raw_code.endswith(")"):
@@ -401,6 +405,8 @@ def _make_display(code: str, dual_behaviors: dict[str, _DualBehavior]) -> KeyDis
                 shifted=_shifted_for_code(args[1]),
                 hold=hold,
                 detail=_detail(raw_code, main=main, hold=hold, tap_raw=args[1], hold_raw=args[0]),
+                tap_raw=args[1],
+                hold_raw=args[0],
             )
 
     layer_match = re.match(r"^(MO|TG|TT|TO)\((\d+)\)$", raw_code)
@@ -878,6 +884,15 @@ def _apply_display_override(
     shifted = key_overrides.get("shifted", display.shifted)
     hold = key_overrides.get("hold", display.hold)
     detail = key_overrides.get("detail", display.detail)
-    if not all(isinstance(value, str) for value in (main, shifted, hold, detail)):
+    tap_raw = key_overrides.get("tap_raw", display.tap_raw)
+    hold_raw = key_overrides.get("hold_raw", display.hold_raw)
+    if not all(isinstance(value, str) for value in (main, shifted, hold, detail, tap_raw, hold_raw)):
         return display
-    return KeyDisplay(main=main, shifted=shifted, hold=hold, detail=detail)
+    return KeyDisplay(
+        main=main,
+        shifted=shifted,
+        hold=hold,
+        detail=detail,
+        tap_raw=tap_raw,
+        hold_raw=hold_raw,
+    )

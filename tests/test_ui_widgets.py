@@ -67,6 +67,7 @@ def test_keyboard_widget_exposes_hover_detail_for_compact_labels() -> None:
     assert hover_info.resolved_code == "LT(4, KC_ENTER)"
     assert hover_info.main == "⏎"
     assert hover_info.hold == "L4"
+    assert hover_info.meaning == "Tap sends Enter; hold activates layer 4."
     assert "hold: L4" in hover_info.detail
 
 
@@ -86,6 +87,7 @@ def test_keyboard_widget_hover_info_includes_transparent_source_layer_and_led_co
     assert hover_info.source_layer_name == "Layer 0"
     assert hover_info.led_color == layout.layers[1].keys[0].led_color
     assert hover_info.led_hex.startswith("#")
+    assert hover_info.meaning == "Transparent: use the key from the next lower active layer."
 
 
 def test_key_tooltip_populates_structured_rows() -> None:
@@ -99,6 +101,7 @@ def test_key_tooltip_populates_structured_rows() -> None:
     tooltip.set_hover_info(hover_info)
 
     assert tooltip.row_text("tap") == "⏎"
+    assert tooltip.row_text("meaning") == "Tap sends Enter; hold activates layer 4."
     assert tooltip.row_text("hold") == "L4"
     assert tooltip.row_text("active_code") == "LT(4, KC_ENTER)"
     assert tooltip.row_text("resolved_code") == "LT(4, KC_ENTER)"
@@ -120,6 +123,21 @@ def test_key_tooltip_shows_inherited_source_and_led_hex() -> None:
     assert tooltip.row_text("active_code") == "KC_TRANSPARENT"
     assert tooltip.row_text("resolved_code") == "KC_GRAVE"
     assert tooltip.row_text("led") == hover_info.led_hex
+
+
+def test_key_tooltip_hides_meaning_for_obvious_keys() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    widget.set_layout_model(layout)
+    hover_info = widget.hover_info_for_key(15)
+    assert hover_info is not None
+    assert hover_info.resolved_code == "KC_Q"
+    tooltip = KeyTooltip()
+
+    tooltip.set_hover_info(hover_info)
+
+    assert tooltip.row_text("meaning") == ""
+    assert tooltip.row_visible("meaning") is False
 
 
 def test_keyboard_widget_paints_nonblank_output_and_highlight() -> None:

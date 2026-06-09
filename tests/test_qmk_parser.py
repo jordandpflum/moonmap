@@ -127,8 +127,24 @@ def test_oryx_dual_function_cases_are_displayed_as_tap_hold() -> None:
     assert dual_key.code == "DUAL_FUNC_0"
     assert dual_key.display.main == "Ctl+`"
     assert dual_key.display.hold == "Ctl+V"
+    assert dual_key.display.tap_raw == "LCTL(KC_GRAVE)"
+    assert dual_key.display.hold_raw == "LCTL(KC_V)"
     assert "tap raw: LCTL(KC_GRAVE)" in dual_key.display.detail
     assert "hold raw: LCTL(KC_V)" in dual_key.display.detail
+
+
+def test_tap_hold_wrappers_preserve_raw_actions() -> None:
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+
+    layer_tap = layout.layers[0].keys[60]
+    mod_tap = layout.layers[0].keys[28]
+
+    assert layer_tap.code == "LT(4, KC_ENTER)"
+    assert layer_tap.display.tap_raw == "KC_ENTER"
+    assert layer_tap.display.hold_raw == "Layer 4"
+    assert mod_tap.code == "MT(MOD_LCTL, KC_ESCAPE)"
+    assert mod_tap.display.tap_raw == "KC_ESCAPE"
+    assert mod_tap.display.hold_raw == "MOD_LCTL"
 
 
 def test_only_mo_and_tg_create_layer_actions(tmp_path: Path) -> None:

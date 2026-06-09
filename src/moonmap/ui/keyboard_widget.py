@@ -19,6 +19,7 @@ from PyQt6.QtCore import QPoint, QPointF, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QPaintEvent, QPainter
 from PyQt6.QtWidgets import QWidget
 
+from moonmap.layout.key_meanings import meaning_for_key
 from moonmap.layout.models import Key, KeyDisplay, Layer, LayerAction, Layout, RgbColor
 from moonmap.ui.key_widget import KeyPaintState, draw_key
 
@@ -40,6 +41,7 @@ class KeyHoverInfo:
     shifted: str
     hold: str
     detail: str
+    meaning: str = ""
     source_layer_index: int | None = None
     source_layer_name: str | None = None
     led_color: RgbColor | None = None
@@ -127,6 +129,9 @@ class KeyboardWidget(QWidget):
         source_key = context.source_key
         effective_key = context.effective_key
         display = self._displays[index]
+        meaning = meaning_for_key(effective_key.code, display)
+        if not meaning and source_key is not None:
+            meaning = meaning_for_key(source_key.code, source_key.display)
         source_layer = (
             self._layer_by_index(context.inherited_layer_index)
             if context.inherited_layer_index is not None
@@ -144,6 +149,7 @@ class KeyboardWidget(QWidget):
             shifted=display.shifted,
             hold=display.hold,
             detail=display.detail,
+            meaning=meaning,
             source_layer_index=source_layer.index if source_layer is not None else None,
             source_layer_name=source_layer.name if source_layer is not None else None,
             led_color=self._led_colors[index],
@@ -327,6 +333,8 @@ class KeyboardWidget(QWidget):
             shifted=display.shifted,
             hold=display.hold,
             detail=detail,
+            tap_raw=display.tap_raw,
+            hold_raw=display.hold_raw,
         )
 
     def _key_index_at(self, point: QPointF) -> int | None:

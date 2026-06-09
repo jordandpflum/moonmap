@@ -24,6 +24,8 @@ class KeyDisplay:
     shifted: str = ""
     hold: str = ""
     detail: str = ""
+    tap_raw: str = ""
+    hold_raw: str = ""
 
 
 @dataclass

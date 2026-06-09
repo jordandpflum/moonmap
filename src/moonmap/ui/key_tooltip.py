@@ -41,6 +41,7 @@ class KeyTooltip(QWidget):
         self._title.setText(title)
         self._subtitle.setText(f"Key {info.index} · Layer {info.active_layer_index} - {info.active_layer_name}")
 
+        self._set_row("meaning", "Meaning", info.meaning)
         self._set_row("tap", "Tap", info.main)
         self._set_row("shift", "Shift", info.shifted)
         self._set_row("hold", "Hold", info.hold)
@@ -150,6 +151,7 @@ class KeyTooltip(QWidget):
 
         for row_number, (row_id, label) in enumerate(
             [
+                ("meaning", "Meaning"),
                 ("tap", "Tap"),
                 ("shift", "Shift"),
                 ("hold", "Hold"),
