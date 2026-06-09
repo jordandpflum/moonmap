@@ -54,6 +54,10 @@ class KeyboardWidget(QWidget):
         """Return the current label for a rendered key."""
         return self._keys[index].label
 
+    def pressed_indexes(self) -> list[int]:
+        """Return indexes currently marked as pressed."""
+        return [index for index, key in self._keys.items() if key.is_pressed]
+
     def set_layout_model(self, layout: Layout | None) -> None:
         """Set the parsed layout model and redraw the active layer."""
         self._layout_model = layout

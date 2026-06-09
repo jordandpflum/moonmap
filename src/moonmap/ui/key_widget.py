@@ -35,6 +35,11 @@ class KeyWidget(QWidget):
         """Return the current displayed label."""
         return self._label
 
+    @property
+    def is_pressed(self) -> bool:
+        """Return whether this key is currently pressed."""
+        return self._pressed
+
     def set_key(self, key: Key | None, *, active_layer: int) -> None:
         """Set the key model displayed by this widget."""
         if key is None:

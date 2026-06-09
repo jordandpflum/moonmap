@@ -14,3 +14,10 @@ Real-time keypress visualizer for the ZSA Moonlander Mark I.
 - `TG(n)` — toggle: layer flips on press
 
 LT, tap dance, and combos are not supported in v1.
+
+## Live input support
+
+Live highlighting is host-output based in v1. The app listens with `pynput`, normalizes the key event Windows
+delivers, and highlights every key on the active layer that maps to that output. Duplicate output keys highlight
+together. Firmware-only keys that do not emit a host key event, such as pure layer keys in some layouts, may not be
+observable without a lower-level Windows/HID integration.

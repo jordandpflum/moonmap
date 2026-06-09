@@ -35,6 +35,8 @@ class KeyboardHook:
 
     def start(self) -> None:
         """Start listening for keyboard events."""
+        if self._listener is not None:
+            return
         self._listener = keyboard.Listener(
             on_press=self._handle_press,
             on_release=self._handle_release,

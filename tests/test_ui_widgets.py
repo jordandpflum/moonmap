@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QCoreApplication
-from PyQt6.QtWidgets import QApplication
-
 from moonmap.layout.qmk_parser import parse_keymap_c
 from moonmap.ui.keyboard_widget import KeyboardWidget
 from moonmap.ui.layer_bar import LayerBar
@@ -18,21 +15,9 @@ SAMPLE_KEYMAP = (
     / "keymap.c"
 )
 EXPECTED_KEY_COUNT = 72
-_QT_APP: QApplication | None = None
-
-
-def _app() -> QApplication:
-    global _QT_APP  # noqa: PLW0603
-    app = QCoreApplication.instance()
-    if isinstance(app, QApplication):
-        _QT_APP = app
-    if _QT_APP is None:
-        _QT_APP = QApplication([])
-    return _QT_APP
 
 
 def test_keyboard_widget_renders_72_keys_and_updates_labels() -> None:
-    _app()
     widget = KeyboardWidget()
     layout = parse_keymap_c(SAMPLE_KEYMAP)
 
@@ -47,7 +32,6 @@ def test_keyboard_widget_renders_72_keys_and_updates_labels() -> None:
 
 
 def test_layer_bar_creates_one_button_per_layer() -> None:
-    _app()
     layout = parse_keymap_c(SAMPLE_KEYMAP)
     layer_bar = LayerBar()
 
@@ -57,8 +41,7 @@ def test_layer_bar_creates_one_button_per_layer() -> None:
 
 
 def test_main_window_loads_layout_path() -> None:
-    _app()
-    window = MainWindow()
+    window = MainWindow(start_hook=False)
 
     window.load_layout_path(SAMPLE_KEYMAP)
 
