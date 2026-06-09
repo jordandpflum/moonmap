@@ -94,6 +94,19 @@ def test_hook_press_on_keypad_layer_matches_printable_host_output() -> None:
     assert status_bar.currentMessage() == "Key down: KC_7; layer 2; matches: 17, 22"
 
 
+def test_hook_press_on_keypad_layer_matches_windows_virtual_keypad_event() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    window._set_active_layer(2)
+
+    window._handle_hook_press(keyboard.KeyCode.from_vk(103))
+
+    assert window._keyboard.pressed_indexes() == [17, 22]
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage() == "Key down: KC_7; layer 2; matches: 17, 22"
+
+
 def test_repeated_press_does_not_retoggle_state() -> None:
     window = MainWindow(start_hook=False, hook_factory=FakeHook)
     window.load_layout_path(SAMPLE_KEYMAP)

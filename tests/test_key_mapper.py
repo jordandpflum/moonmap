@@ -27,6 +27,12 @@ def test_normalize_pynput_special_keys() -> None:
     assert normalize_pynput_key(keyboard.Key.f1) == "KC_F1"
 
 
+def test_normalize_pynput_windows_keypad_virtual_keys() -> None:
+    assert normalize_pynput_key(keyboard.KeyCode.from_vk(103)) == "KC_7"
+    assert normalize_pynput_key(keyboard.KeyCode.from_vk(111)) == "KC_SLASH"
+    assert normalize_pynput_key(keyboard.KeyCode.from_vk(107)) == "KC_EQUAL"
+
+
 def test_normalize_qmk_aliases_and_wrappers() -> None:
     assert normalize_qmk_code("KC_SPC") == "KC_SPACE"
     assert normalize_qmk_code("KC_ESC") == "KC_ESCAPE"
@@ -102,3 +108,5 @@ def test_find_matching_key_indexes_matches_keypad_output_to_printable_host_keys(
 
     assert find_matching_key_indexes(layout, 2, normalize_pynput_key(keyboard.KeyCode.from_char("7"))) == [0]
     assert find_matching_key_indexes(layout, 2, normalize_pynput_key(keyboard.KeyCode.from_char("/"))) == [1]
+    assert find_matching_key_indexes(layout, 2, normalize_pynput_key(keyboard.KeyCode.from_vk(103))) == [0]
+    assert find_matching_key_indexes(layout, 2, normalize_pynput_key(keyboard.KeyCode.from_vk(111))) == [1]

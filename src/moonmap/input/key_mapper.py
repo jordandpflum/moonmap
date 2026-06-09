@@ -78,6 +78,26 @@ _PUNCTUATION_TO_QMK = {
     "?": "KC_SLASH",
 }
 
+# Windows virtual-key codes for keypad events can arrive from pynput with no
+# char/name, especially when Num Lock is involved.
+_PYNPUT_VK_TO_QMK = {
+    96: "KC_KP_0",
+    97: "KC_KP_1",
+    98: "KC_KP_2",
+    99: "KC_KP_3",
+    100: "KC_KP_4",
+    101: "KC_KP_5",
+    102: "KC_KP_6",
+    103: "KC_KP_7",
+    104: "KC_KP_8",
+    105: "KC_KP_9",
+    106: "KC_KP_ASTERISK",
+    107: "KC_KP_PLUS",
+    109: "KC_KP_MINUS",
+    110: "KC_KP_DOT",
+    111: "KC_KP_SLASH",
+}
+
 _SHIFTED_DIGITS_TO_QMK = {
     "!": "KC_1",
     "@": "KC_2",
@@ -142,6 +162,10 @@ def normalize_pynput_key(key: Any) -> str | None:
     char = getattr(key, "char", None)
     if isinstance(char, str) and len(char) == 1:
         return _normalize_char(char)
+
+    vk = getattr(key, "vk", None)
+    if isinstance(vk, int) and vk in _PYNPUT_VK_TO_QMK:
+        return _canonicalize_qmk_code(_PYNPUT_VK_TO_QMK[vk])
 
     name = getattr(key, "name", None)
     if isinstance(name, str):
