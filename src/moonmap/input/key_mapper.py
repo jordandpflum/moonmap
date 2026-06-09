@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from moonmap.layout.models import Key, Layout
+
+ActionSignature = tuple[tuple[str, ...], str]
+
+_MODIFIER_ORDER = ("CTRL", "ALT", "SHIFT", "GUI")
 
 _QMK_ALIAS_TO_CANONICAL = {
     "KC_BSPC": "KC_BACKSPACE",
@@ -137,6 +142,41 @@ _LONG_QMK_NAMES = {
 _QMK_WRAPPER_RE = re.compile(r"^(?:LT|MT)\([^,]+,\s*(.+)\)$")
 _TRANSPARENT_CODES = {"_______", "KC_TRANSPARENT", "KC_TRNS"}
 
+_QMK_MODIFIER_WRAPPERS = {
+    "C": "CTRL",
+    "LCTL": "CTRL",
+    "RCTL": "CTRL",
+    "LCMD": "GUI",
+    "RCMD": "GUI",
+    "LGUI": "GUI",
+    "RGUI": "GUI",
+    "A": "ALT",
+    "LALT": "ALT",
+    "RALT": "ALT",
+    "S": "SHIFT",
+    "LSFT": "SHIFT",
+    "RSFT": "SHIFT",
+}
+
+_NORMALIZED_MODIFIER_CODES = {
+    "KC_LCTL": "CTRL",
+    "KC_RCTL": "CTRL",
+    "KC_LEFT_CTRL": "CTRL",
+    "KC_RIGHT_CTRL": "CTRL",
+    "KC_LALT": "ALT",
+    "KC_RALT": "ALT",
+    "KC_LEFT_ALT": "ALT",
+    "KC_RIGHT_ALT": "ALT",
+    "KC_LSFT": "SHIFT",
+    "KC_RSFT": "SHIFT",
+    "KC_LEFT_SHIFT": "SHIFT",
+    "KC_RIGHT_SHIFT": "SHIFT",
+    "KC_LGUI": "GUI",
+    "KC_RGUI": "GUI",
+    "KC_LEFT_GUI": "GUI",
+    "KC_RIGHT_GUI": "GUI",
+}
+
 _KEYPAD_TO_STANDARD = {
     "KC_KP_0": "KC_0",
     "KC_KP_1": "KC_1",
@@ -155,6 +195,15 @@ _KEYPAD_TO_STANDARD = {
     "KC_KP_DOT": "KC_DOT",
     "KC_KP_ENTER": "KC_ENTER",
 }
+
+
+@dataclass(frozen=True)
+class KeyMatch:
+    """A key match annotated with where it came from."""
+
+    layer_index: int
+    key: Key
+    is_active_layer: bool
 
 
 def normalize_pynput_key(key: Any) -> str | None:
@@ -201,19 +250,79 @@ def find_matching_keys(
     normalized_code: str | None,
 ) -> list[Key]:
     """Return all effective keys matching a normalized host key on a layout layer."""
+    return [
+        match.key
+        for match in find_matching_key_matches(
+            layout,
+            layer_index,
+            normalized_code,
+            include_all_layers=False,
+        )
+    ]
+
+
+def find_matching_key_matches(
+    layout: Layout,
+    layer_index: int,
+    normalized_code: str | None,
+    active_modifiers: set[str] | frozenset[str] | None = None,
+    *,
+    include_all_layers: bool,
+) -> list[KeyMatch]:
+    """Return effective keys matching a host key or chord."""
     if normalized_code is None:
         return []
 
-    layer = next((candidate for candidate in layout.layers if candidate.index == layer_index), None)
-    if layer is None:
+    host_signature = _host_action_signature(normalized_code, active_modifiers)
+    if host_signature is None:
         return []
 
-    return [
-        effective_key
-        for index in range(len(layer.keys))
-        if (effective_key := effective_key_for_index(layout, layer_index, index)) is not None
-        and normalize_qmk_code(effective_key.code) == normalized_code
-    ]
+    matches = _matches_for_layer(layout, layer_index, host_signature, is_active_layer=True)
+    if not include_all_layers:
+        return matches
+
+    active_seen = {(match.layer_index, match.key.index) for match in matches}
+    for layer in sorted(layout.layers, key=lambda candidate: candidate.index):
+        if layer.index == layer_index:
+            continue
+        for match in _matches_for_layer(layout, layer.index, host_signature, is_active_layer=False):
+            identity = (match.layer_index, match.key.index)
+            if identity in active_seen:
+                continue
+            matches.append(match)
+            active_seen.add(identity)
+    return matches
+
+
+def modifier_for_normalized_code(normalized_code: str | None) -> str | None:
+    """Return the host modifier represented by a normalized keycode."""
+    if normalized_code is None:
+        return None
+    return _NORMALIZED_MODIFIER_CODES.get(normalized_code)
+
+
+def format_host_action(
+    normalized_code: str | None,
+    active_modifiers: set[str] | frozenset[str] | None = None,
+) -> str:
+    """Format a normalized host key and modifiers as readable text."""
+    signature = _host_action_signature(normalized_code, active_modifiers)
+    if signature is None:
+        return "Unsupported"
+    return _format_action_signature(signature)
+
+
+def host_inputs_for_key(key: Key) -> list[str]:
+    """Return regular-keyboard inputs that can produce a parsed key action."""
+    inputs = []
+    seen: set[ActionSignature] = set()
+    for raw_action in _raw_actions_for_key(key):
+        signature = _action_signature_for_qmk(raw_action)
+        if signature is None or signature in seen:
+            continue
+        seen.add(signature)
+        inputs.append(_format_action_signature(signature))
+    return inputs
 
 
 def effective_key_for_index(layout: Layout, layer_index: int, index: int) -> Key | None:
@@ -239,6 +348,135 @@ def effective_key_for_index(layout: Layout, layer_index: int, index: int) -> Key
             return candidate
 
     return source_key
+
+
+def _matches_for_layer(
+    layout: Layout,
+    layer_index: int,
+    host_signature: ActionSignature,
+    *,
+    is_active_layer: bool,
+) -> list[KeyMatch]:
+    layer = next((candidate for candidate in layout.layers if candidate.index == layer_index), None)
+    if layer is None:
+        return []
+
+    matches = []
+    for index in range(len(layer.keys)):
+        effective_key = effective_key_for_index(layout, layer_index, index)
+        if effective_key is None:
+            continue
+        if host_signature in _action_signatures_for_key(effective_key):
+            matches.append(
+                KeyMatch(
+                    layer_index=layer_index,
+                    key=effective_key,
+                    is_active_layer=is_active_layer,
+                ),
+            )
+    return matches
+
+
+def _host_action_signature(
+    normalized_code: str | None,
+    active_modifiers: set[str] | frozenset[str] | None = None,
+) -> ActionSignature | None:
+    if normalized_code is None:
+        return None
+    modifiers = _ordered_modifiers(active_modifiers or ())
+    return (modifiers, normalized_code)
+
+
+def _action_signatures_for_key(key: Key) -> set[ActionSignature]:
+    signatures = set()
+    for raw_action in _raw_actions_for_key(key):
+        signature = _action_signature_for_qmk(raw_action)
+        if signature is not None:
+            signatures.add(signature)
+    return signatures
+
+
+def _raw_actions_for_key(key: Key) -> tuple[str, ...]:
+    return tuple(
+        action
+        for action in (key.code, key.display.tap_raw, key.display.hold_raw)
+        if action.strip()
+    )
+
+
+def _action_signature_for_qmk(raw_action: str) -> ActionSignature | None:
+    action = raw_action.strip()
+    if not action or action.startswith("Layer ") or action.startswith("MOD_"):
+        return None
+
+    modifiers: list[str] = []
+    while True:
+        wrapper_match = re.fullmatch(r"([A-Z]+)\((.+)\)", action)
+        if wrapper_match is None:
+            break
+        modifier = _QMK_MODIFIER_WRAPPERS.get(wrapper_match.group(1))
+        if modifier is None:
+            break
+        modifiers.append(modifier)
+        action = wrapper_match.group(2).strip()
+
+    normalized_code = normalize_qmk_code(action)
+    if normalized_code is None:
+        return None
+    return (_ordered_modifiers(modifiers), normalized_code)
+
+
+def _ordered_modifiers(modifiers: set[str] | frozenset[str] | tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    modifier_set = set(modifiers)
+    return tuple(modifier for modifier in _MODIFIER_ORDER if modifier in modifier_set)
+
+
+def _format_action_signature(signature: ActionSignature) -> str:
+    modifiers, normalized_code = signature
+    parts = [_format_modifier(modifier) for modifier in modifiers]
+    parts.append(_format_key_code(normalized_code))
+    return "+".join(parts)
+
+
+def _format_modifier(modifier: str) -> str:
+    return {"CTRL": "Ctrl", "ALT": "Alt", "SHIFT": "Shift", "GUI": "Gui"}.get(modifier, modifier.title())
+
+
+def _format_key_code(normalized_code: str) -> str:
+    if normalized_code.startswith("KC_"):
+        name = normalized_code[3:]
+    else:
+        name = normalized_code
+    names = {
+        "SPACE": "Space",
+        "ENTER": "Enter",
+        "ESCAPE": "Esc",
+        "BACKSPACE": "Backspace",
+        "DELETE": "Delete",
+        "TAB": "Tab",
+        "LEFT": "Left",
+        "RIGHT": "Right",
+        "UP": "Up",
+        "DOWN": "Down",
+        "PAGE_UP": "Page Up",
+        "PAGE_DOWN": "Page Down",
+        "GRAVE": "`",
+        "MINUS": "-",
+        "EQUAL": "=",
+        "LEFT_BRACKET": "[",
+        "RIGHT_BRACKET": "]",
+        "BACKSLASH": "\\",
+        "SEMICOLON": ";",
+        "QUOTE": "'",
+        "COMMA": ",",
+        "DOT": ".",
+        "SLASH": "/",
+    }
+    if name in names:
+        return names[name]
+    if len(name) == 1:
+        return name
+    return name.replace("_", " ").title()
 
 
 def _normalize_char(char: str) -> str | None:

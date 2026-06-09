@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import QWidget
 
 from moonmap.layout.key_meanings import meaning_for_key
 from moonmap.layout.models import Key, KeyDisplay, Layer, LayerAction, Layout, RgbColor
+from moonmap.input.key_mapper import host_inputs_for_key
 from moonmap.ui.key_widget import KeyPaintState, draw_key
 
 ASSET_PATH = Path(__file__).resolve().parents[1] / "assets" / "moonlander_layout.json"
@@ -48,6 +49,9 @@ class KeyHoverInfo:
     layer_action: LayerAction | None = None
     is_pressed: bool = False
     is_layer_key: bool = False
+    host_inputs: tuple[str, ...] = ()
+    active_layer_matches: tuple[str, ...] = ()
+    all_layer_matches: tuple[str, ...] = ()
 
     @property
     def led_hex(self) -> str:
@@ -69,6 +73,7 @@ class KeyboardWidget(QWidget):
     """Render the Moonlander physical key layout."""
 
     hover_info_changed = pyqtSignal(object)
+    key_clicked = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the keyboard widget."""
@@ -156,6 +161,7 @@ class KeyboardWidget(QWidget):
             layer_action=effective_key.layer_action,
             is_pressed=index in self._pressed_indexes,
             is_layer_key=index in self._layer_key_indexes,
+            host_inputs=tuple(host_inputs_for_key(effective_key)),
         )
 
     def key_anchor_global_pos(self, index: int) -> QPoint:
@@ -232,6 +238,15 @@ class KeyboardWidget(QWidget):
             self.hover_info_changed.emit(None)
             return
         self.hover_info_changed.emit(self.hover_info_for_key(index))
+
+    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+        """Emit structured details for click-to-test visual simulation."""
+        index = self._key_index_at(event.position())
+        if index is None:
+            return
+        info = self.hover_info_for_key(index)
+        if info is not None:
+            self.key_clicked.emit(info)
 
     def leaveEvent(self, event: Any) -> None:  # noqa: N802
         """Clear hover details when leaving the keyboard."""

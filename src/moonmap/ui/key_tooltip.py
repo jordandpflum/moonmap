@@ -45,6 +45,7 @@ class KeyTooltip(QWidget):
         self._set_row("tap", "Tap", info.main)
         self._set_row("shift", "Shift", info.shifted)
         self._set_row("hold", "Hold", info.hold)
+        self._set_row("host_inputs", "Regular keyboard", ", ".join(info.host_inputs))
         self._set_row(
             "layer_action",
             "Layer",
@@ -155,6 +156,7 @@ class KeyTooltip(QWidget):
                 ("tap", "Tap"),
                 ("shift", "Shift"),
                 ("hold", "Hold"),
+                ("host_inputs", "Regular keyboard"),
                 ("layer_action", "Layer"),
                 ("active_code", "Active code"),
                 ("resolved_code", "Resolved code"),

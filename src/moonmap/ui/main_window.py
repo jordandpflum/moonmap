@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -28,9 +29,17 @@ from PyQt6.QtWidgets import (
 
 from moonmap import config
 from moonmap.input.hook import KeyboardHook
-from moonmap.input.key_mapper import find_matching_keys, normalize_pynput_key
+from moonmap.input.key_mapper import (
+    KeyMatch,
+    find_matching_key_matches,
+    format_host_action,
+    modifier_for_normalized_code,
+    normalize_pynput_key,
+)
 from moonmap.layout.layer_state import LayerStateManager
+from moonmap.layout.key_meanings import meaning_for_key
 from moonmap.layout.models import Key, Layout
+from moonmap.ui.key_event_log import KeyEventLog, KeyEventLogEntry
 from moonmap.layout.qmk_parser import parse_keymap_c
 from moonmap.ui.key_tooltip import KeyTooltip
 from moonmap.ui.keyboard_widget import KeyHoverInfo, KeyboardWidget
@@ -61,8 +70,10 @@ class KeyboardSignals(QObject):
 class PressedKeyState:
     """Tracks highlighted indexes and source keys for one host key press."""
 
+    host_action: str
     indexes: list[int]
     keys: list[Key]
+    matches: list[KeyMatch]
 
 
 class MainWindow(QMainWindow):
@@ -82,6 +93,7 @@ class MainWindow(QMainWindow):
         self._layer_state = LayerStateManager()
         self._active_layer_index = 0
         self._pressed_keys: dict[str, PressedKeyState] = {}
+        self._active_modifiers: set[str] = set()
         self._pending_hover_info: KeyHoverInfo | None = None
         self._keyboard_signals = KeyboardSignals(self)
         self._keyboard_signals.pressed.connect(self._handle_hook_press)
@@ -94,6 +106,7 @@ class MainWindow(QMainWindow):
 
         self._layer_bar = LayerBar(self)
         self._keyboard = KeyboardWidget(self)
+        self._key_event_log = KeyEventLog(self)
         self._key_tooltip = KeyTooltip(self)
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
@@ -101,6 +114,7 @@ class MainWindow(QMainWindow):
         self._hover_timer.timeout.connect(self._show_pending_hover_tooltip)
         self._keyboard.set_highlight_color(str(self._cfg["highlight_color"]))
         self._keyboard.hover_info_changed.connect(self._handle_hover_info_changed)
+        self._keyboard.key_clicked.connect(self._handle_key_clicked)
         self._layer_bar.manual_layer_override.connect(self._set_active_layer)
 
         container = QWidget(self)
@@ -109,6 +123,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.addWidget(self._layer_bar)
         layout.addWidget(self._keyboard)
+        layout.addWidget(self._key_event_log)
         self.setCentralWidget(container)
 
         self._build_menu()
@@ -130,6 +145,8 @@ class MainWindow(QMainWindow):
         self._layout_model = layout
         self._layer_state.reset()
         self._pressed_keys.clear()
+        self._active_modifiers.clear()
+        self._key_event_log.clear()
         self._hide_hover_tooltip()
         self._keyboard.set_layout_model(layout)
         self._layer_bar.set_layers(layout.layers)
@@ -225,16 +242,41 @@ class MainWindow(QMainWindow):
         normalized_code = normalize_pynput_key(raw_key)
         if normalized_code is None:
             self._show_status(f"Key down ignored: unsupported event {raw_key!r}")
+            self._log_key_event(
+                event_type="ignored",
+                raw_event=repr(raw_key),
+                host_action="Unsupported",
+                matches=[],
+                all_matches=[],
+            )
             return
 
         if normalized_code in self._pressed_keys:
             return
 
-        matched_keys = self._matching_keys(normalized_code)
+        modifier = modifier_for_normalized_code(normalized_code)
+        active_modifiers = frozenset(self._active_modifiers)
+        matches = self._matching_matches(normalized_code, active_modifiers)
+        active_matches = [match for match in matches if match.is_active_layer]
+        highlighted_matches = active_matches or matches
+        matched_keys = [match.key for match in highlighted_matches]
         indexes = [key.index for key in matched_keys]
-        self._pressed_keys[normalized_code] = PressedKeyState(indexes=indexes, keys=matched_keys)
+        host_action = format_host_action(normalized_code, active_modifiers)
+        self._pressed_keys[normalized_code] = PressedKeyState(
+            host_action=host_action,
+            indexes=indexes,
+            keys=matched_keys,
+            matches=highlighted_matches,
+        )
 
-        self._show_key_diagnostic("down", normalized_code, indexes)
+        self._show_key_diagnostic("down", normalized_code, indexes, host_action=host_action)
+        self._log_key_event(
+            event_type="press",
+            raw_event=repr(raw_key),
+            host_action=host_action,
+            matches=active_matches,
+            all_matches=matches,
+        )
 
         for index in indexes:
             self._keyboard.update_key_state(index, True)
@@ -248,15 +290,27 @@ class MainWindow(QMainWindow):
         if layer_changed:
             self._set_active_layer(self._layer_state.active_layer())
 
+        if modifier is not None:
+            self._active_modifiers.add(modifier)
+
     def _handle_hook_release(self, raw_key: Any) -> None:
         normalized_code = normalize_pynput_key(raw_key)
         if normalized_code is None:
             self._show_status(f"Key up ignored: unsupported event {raw_key!r}")
+            self._log_key_event(
+                event_type="ignored",
+                raw_event=repr(raw_key),
+                host_action="Unsupported",
+                matches=[],
+                all_matches=[],
+            )
             return
 
         pressed_state = self._pressed_keys.pop(normalized_code, None)
         if pressed_state is None:
-            self._show_key_diagnostic("up", normalized_code, [])
+            host_action = format_host_action(normalized_code, frozenset(self._active_modifiers))
+            self._show_key_diagnostic("up", normalized_code, [], host_action=host_action)
+            self._remove_modifier(normalized_code)
             return
 
         for index in pressed_state.indexes:
@@ -271,29 +325,56 @@ class MainWindow(QMainWindow):
         if layer_changed:
             self._set_active_layer(self._layer_state.active_layer())
         else:
-            self._show_key_diagnostic("up", normalized_code, pressed_state.indexes)
+            self._show_key_diagnostic(
+                "up",
+                normalized_code,
+                pressed_state.indexes,
+                host_action=pressed_state.host_action,
+            )
+        self._log_key_event(
+            event_type="release",
+            raw_event=repr(raw_key),
+            host_action=pressed_state.host_action,
+            matches=[match for match in pressed_state.matches if match.is_active_layer],
+            all_matches=pressed_state.matches,
+        )
+        self._remove_modifier(normalized_code)
 
-    def _matching_keys(self, normalized_code: str) -> list[Key]:
+    def _matching_matches(
+        self,
+        normalized_code: str,
+        active_modifiers: frozenset[str],
+    ) -> list[KeyMatch]:
         if self._layout_model is None:
             return []
 
-        return find_matching_keys(
+        return find_matching_key_matches(
             self._layout_model,
             self._active_layer_index,
             normalized_code,
+            active_modifiers,
+            include_all_layers=True,
         )
 
     def _show_hook_error(self, message: str) -> None:
         self._show_status(f"Keyboard hook unavailable: {message}")
 
-    def _show_key_diagnostic(self, event_name: str, normalized_code: str, indexes: list[int]) -> None:
+    def _show_key_diagnostic(
+        self,
+        event_name: str,
+        normalized_code: str,
+        indexes: list[int],
+        *,
+        host_action: str | None = None,
+    ) -> None:
         if self._layout_model is None:
             self._show_status(f"Key {event_name}: {normalized_code}; no layout loaded")
             return
 
         match_text = ", ".join(str(index) for index in indexes) if indexes else "none"
+        code_text = host_action if host_action and host_action != _format_code_fallback(normalized_code) else normalized_code
         self._show_status(
-            f"Key {event_name}: {normalized_code}; layer {self._active_layer_index}; "
+            f"Key {event_name}: {code_text}; layer {self._active_layer_index}; "
             f"matches: {match_text}",
         )
 
@@ -321,3 +402,63 @@ class MainWindow(QMainWindow):
         self._hover_timer.stop()
         self._pending_hover_info = None
         self._key_tooltip.hide()
+
+    def _remove_modifier(self, normalized_code: str) -> None:
+        modifier = modifier_for_normalized_code(normalized_code)
+        if modifier is not None:
+            self._active_modifiers.discard(modifier)
+
+    def _handle_key_clicked(self, info: object) -> None:
+        if not isinstance(info, KeyHoverInfo):
+            return
+        self._keyboard.update_key_state(info.index, True)
+        QTimer.singleShot(200, lambda: self._keyboard.update_key_state(info.index, False))
+        host_action = ", ".join(info.host_inputs) if info.host_inputs else info.resolved_code
+        self._show_status(f"Simulated: key {info.index}; {host_action}; visual only")
+        self._key_event_log.add_entry(
+            KeyEventLogEntry(
+                timestamp=datetime.now(),
+                event_type="simulated",
+                raw_event=f"click key {info.index}",
+                host_action=host_action,
+                active_layer_index=self._active_layer_index,
+                active_matches=[f"L{info.active_layer_index}:{info.index} {info.resolved_code}"],
+                all_layer_matches=[f"L{info.active_layer_index}:{info.index} {info.resolved_code}"],
+                meaning=info.meaning,
+            ),
+        )
+
+    def _log_key_event(
+        self,
+        *,
+        event_type: str,
+        raw_event: str,
+        host_action: str,
+        matches: list[KeyMatch],
+        all_matches: list[KeyMatch],
+    ) -> None:
+        self._key_event_log.add_entry(
+            KeyEventLogEntry(
+                timestamp=datetime.now(),
+                event_type=event_type,
+                raw_event=raw_event,
+                host_action=host_action,
+                active_layer_index=self._active_layer_index,
+                active_matches=[self._match_label(match) for match in matches],
+                all_layer_matches=[self._match_label(match) for match in all_matches],
+                meaning=self._meaning_for_matches(matches or all_matches),
+            ),
+        )
+
+    def _match_label(self, match: KeyMatch) -> str:
+        return f"L{match.layer_index}:{match.key.index} {match.key.code}"
+
+    def _meaning_for_matches(self, matches: list[KeyMatch]) -> str:
+        if not matches:
+            return ""
+        key = matches[0].key
+        return meaning_for_key(key.code, key.display)
+
+
+def _format_code_fallback(normalized_code: str) -> str:
+    return format_host_action(normalized_code, frozenset())

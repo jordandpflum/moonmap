@@ -21,6 +21,7 @@ SAMPLE_KEYMAP = (
 EXPECTED_KEY_COUNT = 72
 HIGHLIGHT_RGB = QColor("#4FC3F7").getRgb()[:3]
 ENTER_THUMB_INDEX = 60
+DUAL_9_X_INDEX = 56
 
 
 def test_keyboard_widget_renders_72_keys_and_updates_labels() -> None:
@@ -108,6 +109,21 @@ def test_key_tooltip_populates_structured_rows() -> None:
     assert tooltip.row_visible("shift") is False
 
 
+def test_key_tooltip_shows_regular_keyboard_inputs_for_dual_function_key() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    widget.set_layout_model(layout)
+    hover_info = widget.hover_info_for_key(DUAL_9_X_INDEX)
+    assert hover_info is not None
+    tooltip = KeyTooltip()
+
+    tooltip.set_hover_info(hover_info)
+
+    assert hover_info.host_inputs == ("9", "Ctrl+X")
+    assert tooltip.row_text("host_inputs") == "9, Ctrl+X"
+    assert tooltip.row_visible("host_inputs") is True
+
+
 def test_key_tooltip_shows_inherited_source_and_led_hex() -> None:
     widget = KeyboardWidget()
     layout = parse_keymap_c(SAMPLE_KEYMAP)
@@ -138,6 +154,23 @@ def test_key_tooltip_hides_meaning_for_obvious_keys() -> None:
 
     assert tooltip.row_text("meaning") == ""
     assert tooltip.row_visible("meaning") is False
+    assert tooltip.row_visible("host_inputs") is True
+
+
+def test_key_tooltip_hides_regular_keyboard_row_when_no_host_input() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    layout.layers[0].keys[15].code = "CUSTOM_THING"
+    layout.layers[0].keys[15].display = layout.layers[0].keys[15].display.__class__()
+    widget.set_layout_model(layout)
+    hover_info = widget.hover_info_for_key(15)
+    assert hover_info is not None
+    tooltip = KeyTooltip()
+
+    tooltip.set_hover_info(hover_info)
+
+    assert tooltip.row_text("host_inputs") == ""
+    assert tooltip.row_visible("host_inputs") is False
 
 
 def test_keyboard_widget_paints_nonblank_output_and_highlight() -> None:
@@ -188,6 +221,19 @@ def test_main_window_hover_does_not_replace_live_status_bar() -> None:
     window._handle_hover_info_changed(hover_info)
 
     assert status_bar.currentMessage() == "Key down: KC_A; layer 0; matches: 29"
+
+
+def test_main_window_simulated_click_highlights_and_logs_event() -> None:
+    window = MainWindow(start_hook=False)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    hover_info = window._keyboard.hover_info_for_key(DUAL_9_X_INDEX)
+    assert hover_info is not None
+
+    window._handle_key_clicked(hover_info)
+
+    assert window._keyboard.pressed_indexes() == [DUAL_9_X_INDEX]
+    assert window._key_event_log.entries()[-1].event_type == "simulated"
+    assert window._key_event_log.entries()[-1].host_action == "9, Ctrl+X"
 
 
 def _count_nonwhite_pixels(image: QImage) -> int:

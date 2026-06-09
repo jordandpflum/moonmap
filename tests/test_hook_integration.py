@@ -15,6 +15,7 @@ SAMPLE_KEYMAP = (
     / "zsa_moonlander_full-featured-qwerty-writing-lay_source"
     / "keymap.c"
 )
+DUAL_9_X_INDEX = 56
 
 
 class FakeHook:
@@ -107,6 +108,24 @@ def test_hook_press_on_keypad_layer_matches_windows_virtual_keypad_event() -> No
     assert status_bar.currentMessage() == "Key down: KC_7; layer 2; matches: 17, 22"
 
 
+def test_modifier_down_then_key_press_matches_chord() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+
+    window._handle_hook_press(keyboard.Key.ctrl)
+    window._handle_hook_press(keyboard.KeyCode.from_char("x"))
+
+    assert DUAL_9_X_INDEX in window._keyboard.pressed_indexes()
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage() == f"Key down: Ctrl+X; layer 0; matches: {DUAL_9_X_INDEX}"
+
+    window._handle_hook_release(keyboard.KeyCode.from_char("x"))
+    window._handle_hook_release(keyboard.Key.ctrl)
+
+    assert window._keyboard.pressed_indexes() == []
+
+
 def test_repeated_press_does_not_retoggle_state() -> None:
     window = MainWindow(start_hook=False, hook_factory=FakeHook)
     window.load_layout_path(SAMPLE_KEYMAP)
@@ -136,6 +155,7 @@ def test_unsupported_event_reports_status() -> None:
     status_bar = window.statusBar()
     assert status_bar is not None
     assert status_bar.currentMessage().startswith("Key down ignored: unsupported event")
+    assert window._key_event_log.entries()[-1].event_type == "ignored"
 
 
 def test_observable_mo_action_updates_active_layer_and_resets_on_release() -> None:
