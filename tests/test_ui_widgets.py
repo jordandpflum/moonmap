@@ -72,6 +72,22 @@ def test_keyboard_widget_exposes_hover_detail_for_compact_labels() -> None:
     assert "hold: L4" in hover_info.detail
 
 
+def test_keyboard_widget_bottom_right_row_matches_qmk_order() -> None:
+    widget = KeyboardWidget()
+    layout = parse_keymap_c(SAMPLE_KEYMAP)
+    widget.set_layout_model(layout)
+
+    assert [widget.label_for_key(index) for index in range(61, 66)] == ["←", "↓", "↑", "→", "TT 3"]
+    assert [layout.layers[0].keys[index].code for index in range(60, 66)] == [
+        "LT(4, KC_ENTER)",
+        "KC_LEFT",
+        "KC_DOWN",
+        "KC_UP",
+        "KC_RIGHT",
+        "TT(3)",
+    ]
+
+
 def test_keyboard_widget_hover_info_includes_transparent_source_layer_and_led_color() -> None:
     widget = KeyboardWidget()
     layout = parse_keymap_c(SAMPLE_KEYMAP)

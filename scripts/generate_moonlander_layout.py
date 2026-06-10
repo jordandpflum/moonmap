@@ -4,7 +4,9 @@ The base geometry mirrors the wxPython drawing math from
 https://github.com/Nuigurumi777/mllayoutvisualizer, which is MIT licensed.
 The emitted key indexes follow the `LAYOUT_moonlander(...)` argument order
 produced by Oryx: each main row lists left-half keys followed by right-half
-keys, then the thumb-cluster arguments.
+keys. The two wide inner keys on the bottom row are still part of the main
+row argument order; only the three tall keys on each thumb cluster are thumb
+arguments.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ RIGHT_ANCHOR = 900
 ROW_TOP_OFFSETS = [20, 20, 10, 0, 10, 20, 20]
 CANVAS_WIDTH = 978
 CANVAS_HEIGHT = 485
-FULL_ROWS_BEFORE_TAPER = 3
+ROW_KEY_COUNTS = [7, 7, 7, 6, 5]
 LEFT_THUMB_TRANSFORM = (420, 0, math.pi / 6.0)
 RIGHT_THUMB_TRANSFORM = (240, 475, -math.pi / 6.0)
 
@@ -32,12 +34,8 @@ RIGHT_THUMB_TRANSFORM = (240, 475, -math.pi / 6.0)
 def _main_half_positions(*, left_to_right: bool) -> list[list[dict[str, Any]]]:
     rows: list[list[dict[str, Any]]] = []
     top = MAIN_TOP
-    keys_in_row = 7
 
-    for row_index in range(5):
-        if row_index >= FULL_ROWS_BEFORE_TAPER:
-            keys_in_row -= 1
-
+    for keys_in_row in ROW_KEY_COUNTS:
         row: list[dict[str, Any]] = []
         for key_index in range(keys_in_row):
             top_offset = ROW_TOP_OFFSETS[key_index]
@@ -84,6 +82,16 @@ def _thumb_positions(*, left_to_right: bool) -> list[dict[str, Any]]:
     return [_transform_thumb_rect(rect, transform) for rect in local_rects]
 
 
+def _thumb_wide_position(*, left_to_right: bool) -> dict[str, Any]:
+    """Return the wide inner thumb key used by the main-row argument order."""
+    return _thumb_positions(left_to_right=left_to_right)[0]
+
+
+def _thumb_tall_positions(*, left_to_right: bool) -> list[dict[str, Any]]:
+    """Return the three tall thumb keys that follow the main-row arguments."""
+    return _thumb_positions(left_to_right=left_to_right)[1:]
+
+
 def _transform_thumb_rect(rect: dict[str, Any], transform: tuple[float, float, float]) -> dict[str, Any]:
     dx, dy, angle = transform
     x = float(rect["x"])
@@ -127,14 +135,18 @@ def build_layout() -> dict[str, Any]:
     right_rows = _main_half_positions(left_to_right=False)
 
     keys: list[dict[str, Any]] = []
-    for row_index in range(5):
+    for row_index in range(4):
         for key in left_rows[row_index]:
             keys.append(key)
         for key in reversed(right_rows[row_index]):
             keys.append(key)
 
-    keys.extend(_thumb_positions(left_to_right=True))
-    keys.extend(_thumb_positions(left_to_right=False))
+    keys.extend(left_rows[4])
+    keys.append(_thumb_wide_position(left_to_right=True))
+    keys.append(_thumb_wide_position(left_to_right=False))
+    keys.extend(reversed(right_rows[4]))
+    keys.extend(_thumb_tall_positions(left_to_right=True))
+    keys.extend(_thumb_tall_positions(left_to_right=False))
 
     for index, key in enumerate(keys):
         key["index"] = index

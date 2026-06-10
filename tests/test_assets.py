@@ -7,13 +7,13 @@ from typing import Any
 
 ASSET_PATH = Path(__file__).resolve().parents[1] / "src/moonmap/assets/moonlander_layout.json"
 EXPECTED_KEY_COUNT = 72
-THUMB_KEY_INDEXES = range(64, 72)
+ROTATED_KEY_INDEXES = (59, 60, 66, 67, 68, 69, 70, 71)
 RIGHT_HAND_ROW_SLICES = [
     slice(7, 14),
     slice(21, 28),
     slice(35, 42),
     slice(48, 54),
-    slice(59, 64),
+    slice(60, 66),
 ]
 
 
@@ -48,13 +48,13 @@ def test_right_hand_main_rows_follow_visual_left_to_right_order() -> None:
         assert row_x_positions == sorted(row_x_positions)
 
 
-def test_thumb_keys_have_rotation_and_rotated_corners_inside_canvas() -> None:
+def test_rotated_cluster_keys_have_rotation_and_rotated_corners_inside_canvas() -> None:
     data: dict[str, Any] = json.loads(ASSET_PATH.read_text(encoding="utf-8"))
     keys: list[dict[str, Any]] = data["keys"]
     canvas_width = data["canvas_width"]
     canvas_height = data["canvas_height"]
 
-    for index in THUMB_KEY_INDEXES:
+    for index in ROTATED_KEY_INDEXES:
         key = keys[index]
         assert "rotation_degrees" in key
 
