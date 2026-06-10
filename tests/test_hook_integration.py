@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from PyQt6.QtTest import QTest
 from pynput import keyboard
 
 from moonmap.layout.models import LayerAction
-from moonmap.ui.main_window import MainWindow
+from moonmap.ui.main_window import MIN_VISIBLE_HIGHLIGHT_MS, MainWindow
 
 SAMPLE_KEYMAP = (
     Path(__file__).resolve().parents[1]
@@ -54,8 +55,37 @@ def test_hook_press_and_release_highlight_matching_indexes() -> None:
 
     window._handle_hook_release(keyboard.KeyCode.from_char("a"))
 
+    assert window._keyboard.pressed_indexes() == [29]
+    _wait_for_minimum_highlight()
     assert window._keyboard.pressed_indexes() == []
     assert status_bar.currentMessage() == "Key up: KC_A; layer 0; matches: 29"
+
+
+def test_hook_immediate_release_keeps_auto_shift_tap_visible_briefly() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+    window._handle_hook_release(keyboard.KeyCode.from_char("a"))
+
+    assert window._keyboard.pressed_indexes() == [29]
+
+    _wait_for_minimum_highlight()
+
+    assert window._keyboard.pressed_indexes() == []
+
+
+def test_delayed_highlight_clear_does_not_clear_newer_press() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+    window._handle_hook_release(keyboard.KeyCode.from_char("a"))
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+
+    _wait_for_minimum_highlight()
+
+    assert window._keyboard.pressed_indexes() == [29]
 
 
 def test_hook_press_highlights_all_duplicate_matches() -> None:
@@ -123,6 +153,7 @@ def test_modifier_down_then_key_press_matches_chord() -> None:
     window._handle_hook_release(keyboard.KeyCode.from_char("x"))
     window._handle_hook_release(keyboard.Key.ctrl)
 
+    _wait_for_minimum_highlight()
     assert window._keyboard.pressed_indexes() == []
 
 
@@ -171,3 +202,7 @@ def test_observable_mo_action_updates_active_layer_and_resets_on_release() -> No
     window._handle_hook_release(keyboard.KeyCode.from_char("a"))
 
     assert window._active_layer_index == 0
+
+
+def _wait_for_minimum_highlight() -> None:
+    QTest.qWait(MIN_VISIBLE_HIGHLIGHT_MS + 30)

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any, Protocol
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -46,6 +47,7 @@ from moonmap.ui.keyboard_widget import KeyHoverInfo, KeyboardWidget
 from moonmap.ui.layer_bar import LayerBar
 
 HOVER_TOOLTIP_DELAY_MS = 250
+MIN_VISIBLE_HIGHLIGHT_MS = 110
 
 
 class HookLike(Protocol):
@@ -74,6 +76,8 @@ class PressedKeyState:
     indexes: list[int]
     keys: list[Key]
     matches: list[KeyMatch]
+    pressed_at: float
+    highlight_tokens: dict[int, int]
 
 
 class MainWindow(QMainWindow):
@@ -93,6 +97,8 @@ class MainWindow(QMainWindow):
         self._layer_state = LayerStateManager()
         self._active_layer_index = 0
         self._pressed_keys: dict[str, PressedKeyState] = {}
+        self._key_highlight_tokens: dict[int, int] = {}
+        self._next_highlight_token = 0
         self._active_modifiers: set[str] = set()
         self._pending_hover_info: KeyHoverInfo | None = None
         self._keyboard_signals = KeyboardSignals(self)
@@ -145,6 +151,7 @@ class MainWindow(QMainWindow):
         self._layout_model = layout
         self._layer_state.reset()
         self._pressed_keys.clear()
+        self._key_highlight_tokens.clear()
         self._active_modifiers.clear()
         self._key_event_log.clear()
         self._hide_hover_tooltip()
@@ -262,11 +269,14 @@ class MainWindow(QMainWindow):
         matched_keys = [match.key for match in highlighted_matches]
         indexes = [key.index for key in matched_keys]
         host_action = format_host_action(normalized_code, active_modifiers)
+        highlight_tokens = self._set_key_highlights(indexes, True)
         self._pressed_keys[normalized_code] = PressedKeyState(
             host_action=host_action,
             indexes=indexes,
             keys=matched_keys,
             matches=highlighted_matches,
+            pressed_at=monotonic(),
+            highlight_tokens=highlight_tokens,
         )
 
         self._show_key_diagnostic("down", normalized_code, indexes, host_action=host_action)
@@ -277,9 +287,6 @@ class MainWindow(QMainWindow):
             matches=active_matches,
             all_matches=matches,
         )
-
-        for index in indexes:
-            self._keyboard.update_key_state(index, True)
 
         layer_changed = False
         for key in matched_keys:
@@ -313,8 +320,7 @@ class MainWindow(QMainWindow):
             self._remove_modifier(normalized_code)
             return
 
-        for index in pressed_state.indexes:
-            self._keyboard.update_key_state(index, False)
+        self._clear_released_key_highlights(pressed_state)
 
         layer_changed = False
         for key in pressed_state.keys:
@@ -339,6 +345,38 @@ class MainWindow(QMainWindow):
             all_matches=pressed_state.matches,
         )
         self._remove_modifier(normalized_code)
+
+    def _set_key_highlights(self, indexes: list[int], pressed: bool) -> dict[int, int]:
+        highlight_tokens: dict[int, int] = {}
+        for index in indexes:
+            if pressed:
+                self._next_highlight_token += 1
+                token = self._next_highlight_token
+                self._key_highlight_tokens[index] = token
+                highlight_tokens[index] = token
+            else:
+                self._key_highlight_tokens.pop(index, None)
+            self._keyboard.update_key_state(index, pressed)
+        return highlight_tokens
+
+    def _clear_released_key_highlights(self, pressed_state: PressedKeyState) -> None:
+        elapsed_ms = int((monotonic() - pressed_state.pressed_at) * 1000)
+        remaining_ms = max(0, MIN_VISIBLE_HIGHLIGHT_MS - elapsed_ms)
+        if remaining_ms == 0:
+            self._clear_key_highlights_if_current(pressed_state.highlight_tokens)
+            return
+
+        QTimer.singleShot(
+            remaining_ms,
+            lambda: self._clear_key_highlights_if_current(pressed_state.highlight_tokens),
+        )
+
+    def _clear_key_highlights_if_current(self, highlight_tokens: dict[int, int]) -> None:
+        for index, token in highlight_tokens.items():
+            if self._key_highlight_tokens.get(index) != token:
+                continue
+            self._key_highlight_tokens.pop(index, None)
+            self._keyboard.update_key_state(index, False)
 
     def _matching_matches(
         self,
