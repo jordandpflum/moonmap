@@ -6,7 +6,7 @@ from typing import Any
 from PyQt6.QtTest import QTest
 from pynput import keyboard
 
-from moonmap.layout.models import LayerAction
+from moonmap.layout.models import KeyDisplay, LayerAction
 from moonmap.ui.main_window import MIN_VISIBLE_HIGHLIGHT_MS, MainWindow
 
 SAMPLE_KEYMAP = (
@@ -138,6 +138,85 @@ def test_hook_press_on_keypad_layer_matches_windows_virtual_keypad_event() -> No
     assert status_bar.currentMessage() == "Key down: KC_7; layer 2; matches: 17, 22"
 
 
+def test_hook_press_infers_unique_non_active_layer_temporarily() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    _set_only_matching_layers(window, {3: 10})
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 3
+    assert window._keyboard.pressed_indexes() == [10]
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage() == "Key down: KC_A; layer 3; matches: 10"
+
+    window._handle_hook_release(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 0
+
+
+def test_hook_release_restores_committed_layer_after_inference() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    window._set_active_layer(2)
+    _set_only_matching_layers(window, {3: 10})
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 3
+
+    window._handle_hook_release(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 2
+
+
+def test_hook_keeps_inferred_layer_while_another_inferred_layer_key_is_held() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    _set_only_matching_layers(window, {3: 10}, code="KC_A")
+    assert window._layout_model is not None
+    window._layout_model.layers[3].keys[11].code = "KC_B"
+    window._layout_model.layers[3].keys[11].display = KeyDisplay(main="B")
+    window._keyboard.set_layout_model(window._layout_model)
+    window._set_active_layer(0)
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+    window._handle_hook_press(keyboard.KeyCode.from_char("b"))
+    window._handle_hook_release(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 3
+
+    window._handle_hook_release(keyboard.KeyCode.from_char("b"))
+
+    assert window._active_layer_index == 0
+
+
+def test_hook_press_does_not_infer_ambiguous_non_active_layer() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    _set_only_matching_layers(window, {2: 10, 3: 11})
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 0
+    assert window._keyboard.pressed_indexes() == [10, 11]
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    assert status_bar.currentMessage() == "Key down: KC_A; layer 0; matches: 10, 11"
+
+
+def test_hook_press_does_not_infer_when_active_layer_matches() -> None:
+    window = MainWindow(start_hook=False, hook_factory=FakeHook)
+    window.load_layout_path(SAMPLE_KEYMAP)
+    _set_only_matching_layers(window, {0: 9, 3: 10})
+
+    window._handle_hook_press(keyboard.KeyCode.from_char("a"))
+
+    assert window._active_layer_index == 0
+    assert window._keyboard.pressed_indexes() == [9]
+
+
 def test_modifier_down_then_key_press_matches_chord() -> None:
     window = MainWindow(start_hook=False, hook_factory=FakeHook)
     window.load_layout_path(SAMPLE_KEYMAP)
@@ -206,3 +285,26 @@ def test_observable_mo_action_updates_active_layer_and_resets_on_release() -> No
 
 def _wait_for_minimum_highlight() -> None:
     QTest.qWait(MIN_VISIBLE_HIGHLIGHT_MS + 30)
+
+
+def _set_only_matching_layers(
+    window: MainWindow,
+    layer_to_key_index: dict[int, int],
+    *,
+    code: str = "KC_A",
+) -> None:
+    assert window._layout_model is not None
+    for layer in window._layout_model.layers:
+        for key in layer.keys:
+            key.code = "KC_NO"
+            key.display = KeyDisplay()
+            key.layer_action = None
+
+    for layer_index, key_index in layer_to_key_index.items():
+        layer = next(layer for layer in window._layout_model.layers if layer.index == layer_index)
+        layer.keys[key_index].code = code
+        layer.keys[key_index].display = KeyDisplay(main=code.removeprefix("KC_"))
+
+    committed_layer = window._active_layer_index
+    window._keyboard.set_layout_model(window._layout_model)
+    window._set_active_layer(committed_layer)

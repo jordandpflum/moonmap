@@ -19,5 +19,6 @@ LT, tap dance, and combos are not supported in v1.
 
 Live highlighting is host-output based in v1. The app listens with `pynput`, normalizes the key event Windows
 delivers, and highlights every key on the active layer that maps to that output. Duplicate output keys highlight
-together. Firmware-only keys that do not emit a host key event, such as pure layer keys in some layouts, may not be
-observable without a lower-level Windows/HID integration.
+together. If a firmware-only layer key does not emit a host event, the app temporarily infers the displayed layer
+from the next host key output when that output uniquely matches one non-active layer. Exact physical layer-key state
+still requires a lower-level Windows/HID integration.

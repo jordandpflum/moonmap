@@ -78,6 +78,7 @@ class PressedKeyState:
     matches: list[KeyMatch]
     pressed_at: float
     highlight_tokens: dict[int, int]
+    inferred_layer_index: int | None = None
 
 
 class MainWindow(QMainWindow):
@@ -96,7 +97,9 @@ class MainWindow(QMainWindow):
         self._layout_model: Layout | None = None
         self._layer_state = LayerStateManager()
         self._active_layer_index = 0
+        self._committed_layer_index = 0
         self._pressed_keys: dict[str, PressedKeyState] = {}
+        self._inferred_layer_keys: dict[str, int] = {}
         self._key_highlight_tokens: dict[int, int] = {}
         self._next_highlight_token = 0
         self._active_modifiers: set[str] = set()
@@ -151,6 +154,7 @@ class MainWindow(QMainWindow):
         self._layout_model = layout
         self._layer_state.reset()
         self._pressed_keys.clear()
+        self._inferred_layer_keys.clear()
         self._key_highlight_tokens.clear()
         self._active_modifiers.clear()
         self._key_event_log.clear()
@@ -208,6 +212,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Could not load layout", str(exc))
 
     def _set_active_layer(self, layer_index: int) -> None:
+        self._committed_layer_index = layer_index
+        self._inferred_layer_keys.clear()
+        self._show_visual_layer(layer_index)
+
+    def _show_visual_layer(self, layer_index: int) -> None:
         self._hide_hover_tooltip()
         self._active_layer_index = layer_index
         self._keyboard.set_active_layer(layer_index)
@@ -265,6 +274,14 @@ class MainWindow(QMainWindow):
         active_modifiers = frozenset(self._active_modifiers)
         matches = self._matching_matches(normalized_code, active_modifiers)
         active_matches = [match for match in matches if match.is_active_layer]
+        inferred_layer_index = self._inferred_layer_for_press(matches, active_matches)
+        if active_matches and inferred_layer_index is not None:
+            self._inferred_layer_keys[normalized_code] = inferred_layer_index
+        elif inferred_layer_index is not None:
+            self._inferred_layer_keys[normalized_code] = inferred_layer_index
+            self._show_visual_layer(inferred_layer_index)
+            matches = self._matching_matches(normalized_code, active_modifiers)
+            active_matches = [match for match in matches if match.is_active_layer]
         highlighted_matches = active_matches or matches
         matched_keys = [match.key for match in highlighted_matches]
         indexes = [key.index for key in matched_keys]
@@ -277,6 +294,7 @@ class MainWindow(QMainWindow):
             matches=highlighted_matches,
             pressed_at=monotonic(),
             highlight_tokens=highlight_tokens,
+            inferred_layer_index=inferred_layer_index,
         )
 
         self._show_key_diagnostic("down", normalized_code, indexes, host_action=host_action)
@@ -321,6 +339,8 @@ class MainWindow(QMainWindow):
             return
 
         self._clear_released_key_highlights(pressed_state)
+        if pressed_state.inferred_layer_index is not None:
+            self._release_inferred_layer(normalized_code)
 
         layer_changed = False
         for key in pressed_state.keys:
@@ -345,6 +365,24 @@ class MainWindow(QMainWindow):
             all_matches=pressed_state.matches,
         )
         self._remove_modifier(normalized_code)
+
+    def _inferred_layer_for_press(self, matches: list[KeyMatch], active_matches: list[KeyMatch]) -> int | None:
+        if active_matches:
+            if self._inferred_layer_keys:
+                return self._active_layer_index
+            return None
+        layer_indexes = {match.layer_index for match in matches}
+        if len(layer_indexes) != 1:
+            return None
+        return next(iter(layer_indexes))
+
+    def _release_inferred_layer(self, normalized_code: str) -> None:
+        self._inferred_layer_keys.pop(normalized_code, None)
+        if self._inferred_layer_keys:
+            next_layer = next(reversed(self._inferred_layer_keys.values()))
+            self._show_visual_layer(next_layer)
+            return
+        self._show_visual_layer(self._committed_layer_index)
 
     def _set_key_highlights(self, indexes: list[int], pressed: bool) -> dict[int, int]:
         highlight_tokens: dict[int, int] = {}
